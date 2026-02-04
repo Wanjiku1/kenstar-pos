@@ -1,0 +1,109 @@
+"use client";
+import { useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import { toast } from 'sonner';
+import { Zap, CheckSquare } from 'lucide-react';
+
+const SIZE_GROUPS = {
+  numeric: ["22", "24", "26", "28", "30", "32", "34", "36", "38", "40", "42"],
+  alpha: ["XS", "S", "M", "L", "XL", "XXL", "3XL"],
+  corporate: ["S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL"]
+};
+
+export function BulkAddTool({ onSuccess }: { onSuccess: () => void }) {
+  const [productName, setProductName] = useState("");
+  const [basePrice, setBasePrice] = useState("");
+  const [selectedGroup, setSelectedGroup] = useState<keyof typeof SIZE_GROUPS>("alpha");
+  const [loading, setLoading] = useState(false);
+
+  const handleBulkGenerate = async () => {
+   onst variants = SIZE_GROUPS[selectedGroup].map(size => {
+  const generatedSku = `${productName.replace(/\s+/g, '').substring(0,4).toUpperCase()}-${size}-${Math.floor(Math.random() * 1000)}`;
+   if (!productName || !basePrice) return toast.error("Missing details");
+    setLoading(true);
+
+    try {
+      // 1. Create the Base Product
+      const { data: product, error: pError } = await supabase
+        .from('products')
+        .insert([{ name: productName, category: 'Uniform' }])
+        .select().single();
+
+      if (pError) throw pError;
+
+      // 2. Prepare all Variants
+      const variants = SIZE_GROUPS[selectedGroup].map(size => ({
+        product_id: product.id,
+        size: size,
+        sku: `${productName.substring(0,3).toUpperCase()}-${size}-${Math.floor(Math.random() * 1000)}`,
+        price: parseFloat(basePrice),
+        stock_quantity: 0
+      }));
+
+      // 3. Bulk Insert
+      const { error: vError } = await supabase.from('product_variants').insert(variants);
+      if (vError) throw vError;
+
+      toast.success(`Generated ${variants.length} sizes for ${productName}`);
+      setProductName("");
+      setBasePrice("");
+      onSuccess();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    product_id: product.id,
+    size: size,
+    sku: generatedSku,
+    // The barcode can be the SKU or a unique numeric string
+    barcode: generatedSku.replace(/-/g, ''), 
+    price: parseFloat(basePrice),
+    stock_quantity: 0,
+    // Add a placeholder or school-specific image logic
+    image_url: `https://placeholder.com/150?text=${productName}`
+    <div className="bg-white p-6 rounded-3xl border-2 border-dashed border-slate-200">
+      <h3 className="font-black flex items-center gap-2 mb-4 text-slate-700">
+        <Zap className="text-amber-500" size={18} /> BULK SIZE GENERATOR
+      </h3>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input 
+          placeholder="Base Product (e.g. Primary Boys Shorts)"
+          className="p-3 bg-slate-50 rounded-xl border font-bold"
+          value={productName} onChange={e => setProductName(e.target.value)}
+        />
+        <input 
+          type="number" placeholder="Base Price (KES)"
+          className="p-3 bg-slate-50 rounded-xl border font-bold text-blue-600"
+          value={basePrice} onChange={e => setBasePrice(e.target.value)}
+        />
+      </div>
+
+      <div className="flex gap-4 mt-4">
+        {Object.keys(SIZE_GROUPS).map((group) => (
+          <button
+            key={group}
+            onClick={() => setSelectedGroup(group as any)}
+            className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${
+              selectedGroup === group ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"
+            }`}
+          >
+            {group} Sizes
+          </button>
+        ))}
+      </div>
+
+      <button 
+        onClick={handleBulkGenerate}
+        disabled={loading}
+        className="w-full mt-6 bg-amber-500 hover:bg-amber-600 text-white p-4 rounded-xl font-black transition-all shadow-lg active:scale-95 disabled:opacity-50"
+      >
+        {loading ? "GENERATING..." : "GENERATE ALL SIZES IN SYSTEM"}
+      </button>
+    </div>
+  );
+}
