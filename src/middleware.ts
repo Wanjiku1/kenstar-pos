@@ -25,28 +25,34 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // Use getSession instead of getUser for a faster initial check during login
+  const { data: { session } } = await supabase.auth.getSession()
 
-  // 1. PUBLIC ROUTE BYPASS (For Staff)
+  // 1. PUBLIC ROUTE BYPASS
   if (request.nextUrl.pathname.startsWith('/terminal')) {
     return response
   }
 
   // 2. AUTHENTICATION CHECK
-  if (!user && !request.nextUrl.pathname.startsWith('/login')) {
+  if (!session && !request.nextUrl.pathname.startsWith('/login')) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // 3. ROLE AUTHORIZATION (For Manager Dashboard)
-  if (user && request.nextUrl.pathname === '/') {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
+  // 3. ROLE AUTHORIZATION (With error handling to prevent hanging)
+  if (session && request.nextUrl.pathname === '/') {
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', session.user.id)
+        .single()
 
-    // If they aren't an admin, redirect them to the POS or Terminal
-    if (profile?.role !== 'admin' && profile?.role !== 'manager') {
+      // If database is slow or profile missing, don't hang, just send to POS
+      if (error || !profile || (profile.role !== 'admin' && profile.role !== 'manager')) {
+        return NextResponse.redirect(new URL('/pos', request.url))
+      }
+    } catch (e) {
+      // Emergency fallback if the query itself crashes
       return NextResponse.redirect(new URL('/pos', request.url))
     }
   }
