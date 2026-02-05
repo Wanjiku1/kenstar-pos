@@ -10,8 +10,8 @@ export default function QRStation() {
   
   // These match your Shop names in the database
   const shops = [
-    { id: '315', name: 'Main Shop 315', color: 'bg-blue-600' },
-    { id: '172', name: 'Wholesale 172', color: 'bg-slate-900' },
+    { id: '315', name: 'Shop 315', color: 'bg-blue-600' },
+    { id: '172', name: 'Shop 172', color: 'bg-slate-900' },
     { id: 'Stage', name: 'Stage Outlet', color: 'bg-green-600' }
   ];
 
