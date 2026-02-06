@@ -15,7 +15,7 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -23,22 +23,42 @@ export default function LoginPage() {
     if (error) {
       toast.error("Authentication Failed", { description: error.message });
       setLoading(false);
-    } else {
-      toast.success("Login Successful", { description: "Welcome back to Kenstar Ops" });
-      router.push('/pos'); // Redirect to POS after login
+    } else if (data.user) {
+      try {
+        // FETCH USER ROLE TO DETERMINE REDIRECT
+        const { data: profile, error: profileError } = await supabase
+          .from('users') // Change to 'profiles' if that's your table name
+          .select('role')
+          .eq('id', data.user.id)
+          .single();
+
+        if (profileError) throw profileError;
+
+        toast.success("Login Successful", { description: `Welcome back, ${profile?.role}` });
+
+        // ROLE-BASED REDIRECT LOGIC
+        if (profile?.role === 'founder' || profile?.role === 'admin') {
+          router.push('/admin'); // Managers go to HQ
+        } else {
+          router.push('/pos'); // Staff go to POS
+        }
+
+        router.refresh();
+      } catch (err) {
+        console.error("Role Fetch Error:", err);
+        // Fallback to POS if role fetch fails
+        router.push('/pos');
+      }
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-      {/* BACKGROUND DECORATION */}
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 relative">
       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-700 via-blue-500 to-slate-200" />
       
       <div className="w-full max-w-md">
-        {/* LOGO SECTION */}
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center w-20 h-20 bg-blue-700 rounded-3xl shadow-xl shadow-blue-200 mb-4 transform -rotate-6 transition-transform hover:rotate-0 cursor-pointer">
-             {/* Replace this text with an <img> tag for your actual logo */}
              <span className="text-white text-4xl font-black italic">K</span>
           </div>
           <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">
@@ -49,7 +69,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* LOGIN CARD */}
         <div className="bg-white p-8 rounded-[2rem] shadow-2xl shadow-slate-200 border border-slate-100">
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
@@ -91,7 +110,6 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* FOOTER */}
         <div className="mt-8 text-center">
           <p className="text-slate-400 text-[10px] font-bold uppercase flex items-center justify-center gap-2">
             <ShieldCheck size={14} /> Secure AES-256 Encrypted Connection
