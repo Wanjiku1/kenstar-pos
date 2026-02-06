@@ -1,167 +1,175 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase';
 import { UserProfile } from "@/components/auth/user-profile";
-import { RoleGate } from "@/components/auth/role-gate"; // Enforcing the gate
+import { RoleGate } from "@/components/auth/role-gate";
 import { 
-  ShoppingCart, Factory, Package, Banknote, 
-  AlertTriangle, LayoutDashboard, LogOut, 
-  Loader2, RefreshCcw, ShieldCheck
+  ShoppingCart, Factory, Package, Banknote, AlertTriangle, 
+  LayoutDashboard, LogOut, Loader2, ShieldCheck, Clock, 
+  Users, TrendingUp, MapPin, QrCode, Receipt, Send
 } from "lucide-react";
 import Link from 'next/link';
-import { Button } from "@/components/ui/button";
+
+// Dynamically import Map so it doesn't crash during build
+const MapWithNoSSR = dynamic<any>(() => import('@/components/MapComponent'), { 
+  ssr: false,
+  loading: () => <div className="h-full w-full bg-slate-100 animate-pulse flex items-center justify-center font-bold text-slate-400">LOADING SATELLITE FEED...</div>
+});
+
+// Define types for our stats to avoid "never[]" errors
+interface DashboardStats {
+  todaySales: number;
+  lowStockCount: number;
+  lateStaff: any[];
+  totalStockValue: number;
+}
 
 export default function AdminDashboard() {
-  const [todaySales, setTodaySales] = useState(0);
-  const [lowStockItems, setLowStockItems] = useState<any[]>([]);
+  // FIX: Explicitly type the state
+  const [stats, setStats] = useState<DashboardStats>({ 
+    todaySales: 0, 
+    lowStockCount: 0, 
+    lateStaff: [], 
+    totalStockValue: 0 
+  });
+  const [activeStaff, setActiveStaff] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string | null>(null);
-
-  const getDashboardData = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      // 1. Fetch User Role for Sidebar filtering
-      const { data: profile } = await supabase
-        .from('staff')
-        .select('role')
-        .eq('email', session.user.email)
-        .single();
-      
-      setUserRole(profile?.role);
-
-      // 2. Fetch Operational Data (Only Managers/Founders get this far)
-      const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-
-      const [salesRes, stockRes] = await Promise.all([
-        supabase.from('sales').select('total_amount').gte('created_at', todayStart),
-        supabase.from('product_variants').select('*, products(name)').lt('stock_quantity', 10).order('stock_quantity', { ascending: true })
-      ]);
-
-      if (salesRes.error) throw salesRes.error;
-      if (stockRes.error) throw stockRes.error;
-
-      const total = salesRes.data?.reduce((sum, sale) => sum + (sale.total_amount || 0), 0) || 0;
-      setTodaySales(total);
-      setLowStockItems(stockRes.data || []);
-
-    } catch (err: any) {
-      console.error("Dashboard Load Error:", err);
-      setError(err.message || "Failed to load dashboard data.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
-    getDashboardData();
+    const getMasterData = async () => {
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      const [sales, stock, attendance] = await Promise.all([
+        supabase.from('sales').select('total_amount').gte('created_at', todayStart),
+        supabase.from('product_variants').select('stock_quantity, cost_price'),
+        supabase.from('attendance').select('*').eq('Date', todayStart).eq('status', 'Late')
+      ]);
+      
+      let val = 0;
+      stock.data?.forEach(i => val += (i.stock_quantity * (i.cost_price || 0)));
+
+      setStats({
+        todaySales: sales.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0,
+        lowStockCount: stock.data?.filter(i => i.stock_quantity < 10).length || 0,
+        lateStaff: attendance.data || [],
+        totalStockValue: val
+      });
+      setLoading(false);
+    };
+
+    getMasterData();
+
+    const channel = supabase.channel('active-staff-map', { config: { presence: { key: 'admin' } } });
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        const staffList: any[] = [];
+        Object.keys(state).forEach((key) => {
+          state[key].forEach((pres: any) => staffList.push(pres));
+        });
+        setActiveStaff(staffList);
+      })
+      .subscribe();
+
+    return () => { channel.unsubscribe(); };
   }, []);
 
-  if (loading) {
-    return (
-      <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50 gap-4">
-        <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
-        <p className="font-black text-slate-900 tracking-tight uppercase text-xs">Syncing HQ Data...</p>
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-900">
+      <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
+      <p className="text-white font-black uppercase text-xs tracking-widest">Kenstar HQ Booting...</p>
+    </div>
+  );
 
   return (
-    <RoleGate allowedRoles={['founder', 'admin', 'manager']}>
-      <div className="flex h-screen bg-slate-50 overflow-hidden">
+    <RoleGate allowedRoles={['founder', 'admin']}>
+      <div className="flex h-screen bg-slate-100 overflow-hidden font-sans">
+        
         {/* SIDEBAR */}
-        <aside className="w-64 bg-slate-900 text-white flex flex-col shrink-0 shadow-2xl">
-          <div className="p-6">
-            <h1 className="text-xl font-black tracking-tighter italic">KENSTAR <span className="text-blue-400">ERP</span></h1>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest text-blue-400/80">Command Center</p>
+        <aside className="w-72 bg-slate-900 text-white flex flex-col shrink-0 shadow-2xl">
+          <div className="p-8">
+            <h1 className="text-2xl font-black tracking-tighter italic">KENSTAR <span className="text-blue-400">HQ</span></h1>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.3em]">Master Controller</p>
           </div>
-
-          <nav className="flex-1 px-4 space-y-2 mt-4">
-            <NavItem icon={<LayoutDashboard size={20}/>} label="Overview" active />
-            <Link href="/pos"><NavItem icon={<ShoppingCart size={20}/>} label="Retail POS" /></Link>
-            <Link href="/inventory"><NavItem icon={<Package size={20}/>} label="Inventory" /></Link>
-            <Link href="/factory"><NavItem icon={<Factory size={20}/>} label="Factory Ops" /></Link>
-            
-            {/* FOUNDER/ADMIN ONLY SECURE LINK */}
-            {(userRole === 'founder' || userRole === 'admin') && (
-              <Link href="/admin/users">
-                <NavItem icon={<ShieldCheck size={20} className="text-amber-400" />} label="Staff Rites" />
-              </Link>
-            )}
+          <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
+             <Link href="/admin"><NavItem icon={<LayoutDashboard size={18}/>} label="HQ Overview" active /></Link>
+             <Link href="/pos"><NavItem icon={<ShoppingCart size={18}/>} label="POS Terminal" /></Link>
+             <Link href="/qr-station"><NavItem icon={<QrCode size={18}/>} label="QR Station" /></Link>
+             <Link href="/terminal"><NavItem icon={<Clock size={18}/>} label="Attendance" /></Link>
+             <Link href="/inventory"><NavItem icon={<Package size={18}/>} label="Inventory" /></Link>
+             <Link href="/admin/users"><NavItem icon={<ShieldCheck size={18} className="text-amber-400" />} label="Security" /></Link>
           </nav>
-
-          <div className="p-4 border-t border-white/10">
-             <button onClick={() => supabase.auth.signOut()} className="flex items-center gap-3 text-red-400 font-bold p-3 hover:bg-red-500/10 w-full rounded-xl transition-all">
-               <LogOut size={18} /> EXIT SYSTEM
+          <div className="p-6 border-t border-white/5 bg-black/20">
+             <button onClick={() => supabase.auth.signOut()} className="flex items-center gap-3 text-slate-400 font-bold p-3 hover:text-red-400 w-full transition-all text-xs uppercase">
+               <LogOut size={16} /> Logout
              </button>
           </div>
         </aside>
 
-        {/* MAIN CONTENT AREA */}
-        <main className="flex-1 overflow-y-auto">
-          <header className="h-16 bg-white border-b px-8 flex items-center justify-between sticky top-0 z-20">
-            <h2 className="font-bold text-slate-800 uppercase text-xs tracking-widest">HQ Overview</h2>
+        {/* MAIN CONTENT */}
+        <main className="flex-1 overflow-y-auto p-10 space-y-8">
+          <header className="flex justify-between items-center mb-10">
+            <div>
+              <h2 className="font-black text-slate-900 uppercase text-xl tracking-tighter italic">Command Center</h2>
+              <p className="text-[10px] font-bold text-blue-600 uppercase">System Active</p>
+            </div>
             <UserProfile />
           </header>
 
-          <div className="p-8 max-w-6xl mx-auto">
-            {/* STAT CARDS */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              <div className="bg-white border shadow-sm p-6 rounded-3xl flex items-center justify-between transition-transform hover:scale-[1.01]">
-                <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Revenue Today</p>
-                  <p className="text-3xl font-black text-slate-900 mt-1">KES {todaySales.toLocaleString()}</p>
-                </div>
-                <div className="bg-green-100 p-4 rounded-2xl"><Banknote className="text-green-600 w-8 h-8" /></div>
+          {/* MAP & ACTIVE STAFF SECTION */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
+            <div className="lg:col-span-2 bg-white rounded-[3rem] shadow-xl overflow-hidden border-4 border-white relative">
+              <div className="absolute top-6 left-6 z-[1000] bg-slate-900 text-white px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                <span className="w-2 h-2 bg-green-500 rounded-full animate-ping" />
+                Live Satellite Feed
               </div>
-
-              <div className="bg-slate-900 p-6 rounded-3xl text-white flex items-center justify-between shadow-xl shadow-slate-200 transition-transform hover:scale-[1.01]">
-                 <div>
-                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Operational Alerts</p>
-                   <p className="text-3xl font-black mt-1">{lowStockItems.length} Low Stock</p>
-                 </div>
-                 <div className="bg-white/10 p-4 rounded-2xl"><AlertTriangle className="text-amber-400 w-8 h-8" /></div>
-              </div>
+              <MapWithNoSSR staffLocations={activeStaff} />
             </div>
 
-            {/* LOW STOCK ALERT SECTION */}
-            {lowStockItems.length > 0 && (
-              <div className="mb-8 p-6 bg-white border border-slate-200 rounded-3xl shadow-sm">
-                  <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800 uppercase tracking-tight mb-6">
-                      <AlertTriangle className="w-5 h-5 text-amber-500" /> Inventory Warnings
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {lowStockItems.map((item) => (
-                      <div key={item.id} className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex justify-between items-center transition-all hover:border-blue-200">
-                          <div>
-                          <p className="text-sm font-bold text-slate-800">{item.products?.name}</p>
-                          <p className="text-[10px] text-slate-500 uppercase font-black tracking-tighter">{item.size} • SKU: {item.sku}</p>
-                          </div>
-                          <div className={`px-3 py-1 rounded-lg font-black text-sm border ${item.stock_quantity === 0 ? 'bg-red-50 text-red-600 border-red-100' : 'bg-white text-amber-600'}`}>
-                          {item.stock_quantity}
-                          </div>
-                      </div>
-                      ))}
+            <div className="bg-white rounded-[3rem] shadow-xl p-8 border border-slate-200 overflow-y-auto">
+              <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6 border-b pb-4">Online Now ({activeStaff.length})</h3>
+              <div className="space-y-4">
+                {activeStaff.length > 0 ? activeStaff.map((staff, i) => (
+                  <div key={i} className="flex items-center gap-4 p-3 hover:bg-slate-50 rounded-2xl transition-all border border-transparent hover:border-slate-100">
+                    <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-black text-xs">
+                      {staff.name?.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-black text-slate-800 text-xs uppercase">{staff.name || "Unknown Staff"}</p>
+                      <p className="text-[9px] text-green-600 font-bold uppercase">Active: {staff.branch || 'Main'}</p>
+                    </div>
                   </div>
+                )) : (
+                  <p className="text-slate-400 font-bold text-xs italic">All staff offline.</p>
+                )}
               </div>
-            )}
-
-            {/* QUICK LINKS SECTION */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <QuickLinkCard title="Sales" desc="POS Terminal" icon={<ShoppingCart />} href="/pos" color="bg-blue-600" />
-              <QuickLinkCard title="Warehouse" desc="Bulk Stock" icon={<Package />} href="/inventory" color="bg-emerald-600" />
-              <QuickLinkCard title="Factory" desc="Production" icon={<Factory />} href="/factory" color="bg-orange-600" />
-              {(userRole === 'founder' || userRole === 'admin') && (
-                <QuickLinkCard title="Staff" desc="Security Rites" icon={<ShieldCheck />} href="/admin/users" color="bg-slate-900" />
-              )}
             </div>
+          </div>
+
+          {/* STATS GRID */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <StatCard title="Today's Revenue" value={`KES ${stats.todaySales.toLocaleString()}`} icon={<Banknote />} color="bg-green-600" />
+            <StatCard title="Total Stock Value" value={`KES ${stats.totalStockValue.toLocaleString()}`} icon={<Package />} color="bg-blue-600" />
+            <StatCard title="Late Arrivals" value={stats.lateStaff.length.toString()} icon={<AlertTriangle />} color="bg-red-600" />
+          </div>
+
+          {/* LATE STAFF LOG */}
+          <div className="bg-white p-8 rounded-[3rem] shadow-lg border border-slate-200">
+             <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6">Today's Attendance Violations</h3>
+             {stats.lateStaff.length > 0 ? (
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 {stats.lateStaff.map((s, i) => (
+                   <div key={i} className="bg-red-50 p-4 rounded-2xl border border-red-100 flex justify-between items-center">
+                      <span className="font-black text-red-900 uppercase text-xs">{s["Employee Name"]}</span>
+                      <span className="bg-red-200 text-red-800 px-3 py-1 rounded-lg text-[10px] font-black">LATE: {s["Time In"]}</span>
+                   </div>
+                 ))}
+               </div>
+             ) : (
+               <p className="text-slate-400 font-bold text-xs uppercase tracking-widest text-center py-4 italic">No late arrivals today</p>
+             )}
           </div>
         </main>
       </div>
@@ -170,31 +178,26 @@ export default function AdminDashboard() {
 }
 
 // SUB-COMPONENTS
-function NavItem({ icon, label, active = false }: { icon: any, label: string, active?: boolean }) {
+function StatCard({ title, value, icon, color }: any) {
   return (
-    <div className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold cursor-pointer transition-all ${
-      active ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' : 'text-slate-400 hover:bg-white/5'
-    }`}>
-      {icon} <span className="text-sm">{label}</span>
+    <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-200 flex items-center justify-between">
+      <div>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{title}</p>
+        <p className="text-3xl font-black text-slate-900 mt-2 tracking-tighter">{value}</p>
+      </div>
+      <div className={`w-14 h-14 ${color} rounded-2xl flex items-center justify-center text-white shadow-lg`}>
+        {icon}
+      </div>
     </div>
   );
 }
 
-function QuickLinkCard({ title, desc, icon, href, color }: any) {
+function NavItem({ icon, label, active = false }: any) {
   return (
-    <div className="bg-white p-6 rounded-3xl border border-slate-200 hover:shadow-xl transition-all group relative overflow-hidden flex flex-col justify-between">
-      <div>
-        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white mb-4 ${color} shadow-lg shadow-inherit relative z-10`}>
-            {icon}
-        </div>
-        <h3 className="text-xl font-black text-slate-900 relative z-10">{title}</h3>
-        <p className="text-[10px] text-slate-500 mb-6 font-bold uppercase tracking-widest relative z-10">{desc}</p>
-      </div>
-      <Link href={href}>
-        <Button className={`w-full rounded-xl font-black h-11 ${color} hover:opacity-90 transition-opacity uppercase text-[10px] tracking-widest`}>
-          Enter
-        </Button>
-      </Link>
+    <div className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-bold transition-all ${
+      active ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5 hover:text-white'
+    }`}>
+      {icon} <span className="text-[11px] uppercase tracking-wider">{label}</span>
     </div>
   );
 }
