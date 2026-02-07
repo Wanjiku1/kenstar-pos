@@ -1,0 +1,21 @@
+{
+  "name": "Kenstar Terminal",
+  "short_name": "Kenstar",
+  "description": "Kenstar Ops Attendance & ERP Terminal",
+  "start_url": "/terminal",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/fluency/192/000000/shield.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://img.icons8.com/fluency/512/000000/shield.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

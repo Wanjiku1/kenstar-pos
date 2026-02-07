@@ -8,7 +8,6 @@ import Link from 'next/link';
 export default function QRStation() {
   const [selectedShop, setSelectedShop] = useState<any | null>(null);
   
-  // Updated with your provided coordinates
   const shops = [
     { 
       id: '315', 
@@ -21,7 +20,7 @@ export default function QRStation() {
       id: '172', 
       name: 'Shop 172', 
       color: 'bg-slate-900', 
-      lat: -1.2841054429337717, // Same as 315
+      lat: -1.2841054429337717, 
       lng: 36.88731212229706 
     },
     { 
@@ -35,18 +34,19 @@ export default function QRStation() {
 
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   
-  // Updated URL: Passes the branch ID and the coordinates required for the fence
+  // URL encoded into QR: Includes branch ID and Geo-coordinates for the fence check
   const terminalUrl = (shop: any) => 
     `${baseUrl}/terminal?branch=${shop.id}&lat=${shop.lat}&lng=${shop.lng}`;
 
   return (
     <div className="min-h-screen bg-slate-50 p-8 font-sans">
       <div className="max-w-4xl mx-auto mb-12 print:hidden">
-        <Link href="/" className="text-slate-400 hover:text-slate-900 flex items-center gap-2 font-bold text-[10px] uppercase mb-8 transition-colors">
-          <ChevronLeft size={14} /> Back to Manager Dashboard
+        {/* Updated Link to /admin for Manager and Staff safety */}
+        <Link href="/admin" className="text-slate-400 hover:text-slate-900 flex items-center gap-2 font-bold text-[10px] uppercase mb-8 transition-colors">
+          <ChevronLeft size={14} /> Back to Command Center
         </Link>
         <h1 className="text-4xl font-black italic uppercase tracking-tighter text-slate-900">QR Terminal Station</h1>
-        <p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-1">Generate and print branch-specific clock-in posters</p>
+        <p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-1">Generate branch-specific clock-in posters</p>
       </div>
 
       <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 print:hidden">
@@ -80,6 +80,7 @@ export default function QRStation() {
             <Printer size={18} /> Print {selectedShop.name} Poster
           </button>
 
+          {/* PRINTABLE POSTER AREA */}
           <div className="bg-white w-[210mm] h-[297mm] p-16 flex flex-col items-center justify-between border-[24px] border-slate-900 print:shadow-none print:border-[15px] print:m-0 shadow-2xl">
             <div className="text-center">
               <h2 className="text-7xl font-black italic uppercase tracking-tighter text-slate-900 leading-none">KENSTAR OPS</h2>
