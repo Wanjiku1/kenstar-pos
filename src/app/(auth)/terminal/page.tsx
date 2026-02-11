@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useState, Suspense, useEffect, useRef } from 'react';
+export const dynamic = 'force-dynamic'; // Added to prevent caching
+
+import React, { useState, Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { saveAttendanceOffline, getOfflineAttendance, removeSyncedAttendance } from '@/lib/offline-db';
 import { 
-  ShieldCheck, User, Lock, Loader2, Clock, Wifi, WifiOff, 
-  MapPinOff, MapPin, RefreshCw
+  ShieldCheck, User, Lock, Loader2, Wifi, WifiOff, 
+  MapPinOff, RefreshCw, Navigation2
 } from 'lucide-react'; 
 import { toast } from 'sonner';
 
@@ -16,7 +18,6 @@ function TerminalContent() {
   const targetLat = parseFloat(searchParams.get('lat') || '0');
   const targetLng = parseFloat(searchParams.get('lng') || '0');
 
-  // --- CRITICAL STATES ---
   const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState(1); 
   const [loading, setLoading] = useState(false);
@@ -27,14 +28,12 @@ function TerminalContent() {
   const [staffMember, setStaffMember] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  // 1. HYDRATION & CLOCK
   useEffect(() => {
     setMounted(true);
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // 2. NETWORK & SYNC
   useEffect(() => {
     const handleStatus = () => {
       setIsOnline(navigator.onLine);
@@ -49,7 +48,6 @@ function TerminalContent() {
     };
   }, []);
 
-  // 3. STRICT GEOLOCATION
   useEffect(() => {
     if (!mounted) return;
     checkLocation();
@@ -58,7 +56,6 @@ function TerminalContent() {
   const checkLocation = () => {
     if (targetLat === 0) return;
     
-    // Using high accuracy and clear cache for Umoja 1 Market environment
     navigator.geolocation.getCurrentPosition((pos) => {
       const lat1 = pos.coords.latitude;
       const lon1 = pos.coords.longitude;
@@ -69,15 +66,19 @@ function TerminalContent() {
                 Math.cos(lat1 * Math.PI/180) * Math.cos(targetLat * Math.PI/180) *
                 Math.sin(dLon/2) * Math.sin(dLon/2);
       const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      setDistanceInfo(Math.round(distance));
+      
+      const roundedDistance = Math.round(distance);
+      setDistanceInfo(roundedDistance);
 
-      // BUFFER INCREASED: From 250m to 500m for Market buildings
-      if (distance > 500) setGeoError(true);
-      else setGeoError(false);
+      // 500m Buffer for Market GPS Drift
+      if (roundedDistance > 500) {
+        setGeoError(true);
+      } else {
+        setGeoError(false);
+      }
     }, () => setGeoError(true), { 
       enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 0 // Do not use a cached location
+      maximumAge: 0 
     });
   };
 
@@ -120,18 +121,15 @@ function TerminalContent() {
   const processClock = async (type: 'In' | 'Out') => {
     setLoading(true);
     const now = new Date();
-    const hours = now.getHours();
-    const mins = now.getMinutes();
     const timeString = now.toTimeString().split(' ')[0];
     const today = now.toISOString().split('T')[0];
 
     let currentStatus = "On Time";
+    const hours = now.getHours();
+    const mins = now.getMinutes();
 
     if (type === 'In') {
-      if (hours === 7 && mins > 0) currentStatus = "Late";
-      else if (hours > 7 && hours < 8) currentStatus = "Late";
-      else if (hours === 8 && mins > 0) currentStatus = "Late";
-      else if (hours > 8) currentStatus = "Late";
+      if (hours >= 7 && mins > 0) currentStatus = "Late";
     }
 
     if (isOnline) {
@@ -143,7 +141,6 @@ function TerminalContent() {
         .single();
 
       let finalStatus = currentStatus;
-
       if (type === 'Out' && morningRecord?.["Time In"]) {
         const timeIn = new Date(`${today}T${morningRecord["Time In"]}`);
         const hoursWorked = (now.getTime() - timeIn.getTime()) / (1000 * 60 * 60);
@@ -182,18 +179,32 @@ function TerminalContent() {
 
   if (!mounted) return <div className="min-h-screen bg-slate-950" />;
 
+  // UPDATED GEOLOCATION ERROR SCREEN
   if (geoError) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
         <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-sm border-b-8 border-red-600">
-          <MapPinOff size={64} className="text-red-600 mx-auto mb-6 animate-pulse" />
+          <div className="relative inline-block mb-6">
+            <MapPinOff size={64} className="text-red-600 animate-pulse" />
+            <Navigation2 size={24} className="text-slate-900 absolute -bottom-2 -right-2 rotate-45" />
+          </div>
+          
           <h1 className="text-3xl font-black uppercase text-slate-900 tracking-tighter">Out of Range</h1>
-          <p className="text-slate-500 font-bold mt-4 text-[10px] uppercase tracking-[0.2em] leading-relaxed">
-            Location: <span className="text-red-600">{branch}</span><br/>
-            Current: {distanceInfo ?? '...'}m away
+          
+          <div className="mt-6 p-4 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+             <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Measured Distance</p>
+             <p className="text-4xl font-black text-red-600 tracking-tighter">
+                {distanceInfo !== null ? `${distanceInfo}m` : 'Calculating...'}
+             </p>
+             <p className="text-[9px] font-bold text-slate-500 mt-2 uppercase">Allowed: Max 500m from {branch}</p>
+          </div>
+
+          <p className="text-slate-400 font-bold mt-6 text-[10px] uppercase leading-relaxed tracking-wider px-4">
+            Please move closer to the shop entrance or step outside for a better GPS signal.
           </p>
+
           <div className="flex flex-col gap-3 mt-8">
-            <button onClick={() => window.location.reload()} className="bg-slate-900 text-white py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2">
-                <RefreshCw size={14} /> Retry GPS
+            <button onClick={() => window.location.reload()} className="bg-slate-900 text-white py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2 hover:bg-blue-600 transition-all">
+                <RefreshCw size={14} /> Refresh My Location
             </button>
             <button onClick={() => setGeoError(false)} className="text-slate-300 font-black uppercase text-[8px] tracking-[0.2em] hover:text-red-600 transition-colors">
                 Manager Override
