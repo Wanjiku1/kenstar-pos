@@ -5,23 +5,27 @@ export const dynamic = 'force-dynamic';
 import React, { useState, Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { saveAttendanceOffline, getOfflineAttendance, removeSyncedAttendance } from '@/lib/offline-db';
 import { 
   ShieldCheck, User, Lock, Loader2, Wifi, WifiOff, 
-  MapPinOff, RefreshCw, Navigation2
+  MapPinOff, RefreshCw, MapPin, Settings2
 } from 'lucide-react'; 
 import { toast } from 'sonner';
 
+// Master Shop Registry
+const SHOP_DATA: Record<string, { lat: number; lng: number; name: string; color: string }> = {
+  '315': { lat: -1.2825, lng: 36.8967, name: 'Shop 315', color: 'bg-blue-600' },
+  '172': { lat: -1.2825, lng: 36.8967, name: 'Shop 172', color: 'bg-slate-900' },
+  'Stage': { lat: -1.2825, lng: 36.8967, name: 'Stage Outlet', color: 'bg-green-600' }
+};
+
 function TerminalContent() {
   const searchParams = useSearchParams();
-  const branch = searchParams.get('branch') || 'General';
-  const targetLat = parseFloat(searchParams.get('lat') || '0');
-  const targetLng = parseFloat(searchParams.get('lng') || '0');
-
+  
+  const [activeBranch, setActiveBranch] = useState<string | null>(null);
+  const [targetCoords, setTargetCoords] = useState<{lat: number, lng: number} | null>(null);
   const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState(1); 
   const [loading, setLoading] = useState(false);
-  const [isOnline, setIsOnline] = useState(true);
   const [geoError, setGeoError] = useState(false);
   const [distanceInfo, setDistanceInfo] = useState<number | null>(null);
   const [formData, setFormData] = useState({ staffId: '', pin: '' });
@@ -31,98 +35,66 @@ function TerminalContent() {
   useEffect(() => {
     setMounted(true);
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    
+    // Check URL first (Priority/QR Scan)
+    const urlBranch = searchParams.get('branch');
+    const urlLat = searchParams.get('lat');
+    const urlLng = searchParams.get('lng');
+
+    if (urlBranch && SHOP_DATA[urlBranch]) {
+      // If scanned via QR, update and save
+      handleManualBranchSelect(urlBranch);
+    } else {
+      // Otherwise, load from memory
+      const savedBranch = localStorage.getItem('kenstar_saved_branch');
+      if (savedBranch && SHOP_DATA[savedBranch]) {
+        setActiveBranch(savedBranch);
+        setTargetCoords({ lat: SHOP_DATA[savedBranch].lat, lng: SHOP_DATA[savedBranch].lng });
+      }
+    }
     return () => clearInterval(timer);
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
-    const handleStatus = () => {
-      setIsOnline(navigator.onLine);
-      if (navigator.onLine) triggerSync();
-    };
-    window.addEventListener('online', handleStatus);
-    window.addEventListener('offline', handleStatus);
-    handleStatus(); 
-    return () => {
-      window.removeEventListener('online', handleStatus);
-      window.removeEventListener('offline', handleStatus);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!mounted) return;
-    checkLocation();
-  }, [mounted, targetLat, targetLng]);
+    if (mounted && targetCoords) checkLocation();
+  }, [mounted, targetCoords]);
 
   const checkLocation = () => {
-    if (targetLat === 0) return;
-    
-    // Safety timeout to prevent "Calculating..." hanging forever
-    const timeoutId = setTimeout(() => {
-      if (distanceInfo === null) {
-        setGeoError(true);
-        toast.error("GPS taking too long. Move to an open area.");
-      }
-    }, 12000);
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        clearTimeout(timeoutId);
-        const lat1 = pos.coords.latitude;
-        const lon1 = pos.coords.longitude;
-        
-        // Haversine Formula
-        const R = 6371e3; 
-        const dLat = (targetLat - lat1) * Math.PI / 180;
-        const dLon = (targetLng - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                  Math.cos(lat1 * Math.PI/180) * Math.cos(targetLat * Math.PI/180) *
-                  Math.sin(dLon/2) * Math.sin(dLon/2);
-        const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        
-        const roundedDistance = Math.round(distance);
-        setDistanceInfo(roundedDistance);
-
-        // 500m Buffer for Market GPS Drift
-        if (roundedDistance > 1500) {
-          setGeoError(true);
-        } else {
-          setGeoError(false);
-        }
-      },
-      (err) => {
-        clearTimeout(timeoutId);
-        setGeoError(true);
-        console.error("GPS Error:", err.message);
-        toast.error(`GPS Error: ${err.message}`);
-      },
-      { 
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0 
-      }
-    );
+    if (!targetCoords) return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const lat1 = pos.coords.latitude;
+      const lon1 = pos.coords.longitude;
+      const R = 6371e3; 
+      const dLat = (targetCoords.lat - lat1) * Math.PI / 180;
+      const dLon = (targetCoords.lng - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI/180) * Math.cos(targetCoords.lat * Math.PI/180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const roundedDistance = Math.round(distance);
+      setDistanceInfo(roundedDistance);
+      // Using your successful 1500m buffer
+      setGeoError(roundedDistance > 1500);
+    }, () => setGeoError(true), { enableHighAccuracy: true });
   };
 
-  const triggerSync = async () => {
-    const offlineItems = await getOfflineAttendance();
-    if (offlineItems.length === 0) return;
-    for (const item of offlineItems) {
-      const { error } = await supabase.from('attendance').upsert({
-        "Employee Id": item["Employee Id"],
-        "Employee Name": item["Employee Name"],
-        "Shop": item.Shop,
-        "Date": item.Date,
-        "status": item.status,
-        "Is Paid": false,
-        [item.type === 'In' ? "Time In" : "Time Out"]: item.time
-      }, { onConflict: 'Employee Id, Date' });
-      if (!error) await removeSyncedAttendance(item.id);
-    }
-    toast.success(`Synced ${offlineItems.length} records`);
+  const handleManualBranchSelect = (id: string) => {
+    const shop = SHOP_DATA[id];
+    setActiveBranch(id);
+    setTargetCoords({ lat: shop.lat, lng: shop.lng });
+    localStorage.setItem('kenstar_saved_branch', id);
+    toast.info(`Terminal switched to ${shop.name}`);
+  };
+
+  const resetTerminal = () => {
+    localStorage.removeItem('kenstar_saved_branch');
+    setActiveBranch(null);
+    setTargetCoords(null);
+    setStep(1);
   };
 
   const handleVerify = async () => {
-    if (!formData.staffId || !formData.pin) return toast.error("Enter ID and PIN");
+    if (!formData.staffId || !formData.pin) return toast.error("Enter credentials");
     setLoading(true);
     const { data, error } = await supabase.from('staff')
       .select('*')
@@ -131,7 +103,7 @@ function TerminalContent() {
       .single();
 
     if (error || !data) {
-      toast.error("Access Denied: Invalid Credentials");
+      toast.error("Invalid ID or PIN");
     } else {
       setStaffMember(data);
       setStep(2);
@@ -139,119 +111,70 @@ function TerminalContent() {
     setLoading(false);
   };
 
-  const processClock = async (type: 'In' | 'Out') => {
-    setLoading(true);
-    const now = new Date();
-    const timeString = now.toTimeString().split(' ')[0];
-    const today = now.toISOString().split('T')[0];
+  if (!mounted) return null;
 
-    let currentStatus = "On Time";
-    if (type === 'In' && (now.getHours() >= 7 && now.getMinutes() > 0)) {
-      currentStatus = "Late";
-    }
+  // VIEW 1: SHOP SELECTION (When no branch is saved)
+  if (!activeBranch) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6">
+        <div className="bg-white rounded-[3rem] p-10 w-full max-w-sm text-center shadow-2xl">
+          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <MapPin className="text-blue-600" size={32} />
+          </div>
+          <h1 className="text-2xl font-black uppercase tracking-tighter text-slate-900">Branch Setup</h1>
+          <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em] mb-8 mt-2">Which shop is this phone located in?</p>
+          <div className="space-y-3">
+            {Object.keys(SHOP_DATA).map((id) => (
+              <button 
+                key={id} 
+                onClick={() => handleManualBranchSelect(id)}
+                className="w-full bg-slate-50 hover:bg-slate-900 hover:text-white py-5 rounded-2xl font-black uppercase text-xs transition-all border-2 border-slate-100 flex items-center justify-between px-8 group"
+              >
+                {SHOP_DATA[id].name}
+                <div className={`w-2 h-2 rounded-full ${SHOP_DATA[id].color}`} />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-    if (isOnline) {
-      const { data: morningRecord } = await supabase
-        .from('attendance')
-        .select('*')
-        .eq('Employee Id', staffMember["Employee Id"])
-        .eq('Date', today)
-        .single();
-
-      let finalStatus = currentStatus;
-      if (type === 'Out' && morningRecord?.["Time In"]) {
-        const timeIn = new Date(`${today}T${morningRecord["Time In"]}`);
-        const hoursWorked = (now.getTime() - timeIn.getTime()) / (1000 * 60 * 60);
-        if (hoursWorked > 11) finalStatus = "Overtime";
-        else finalStatus = morningRecord.status;
-      }
-
-      await supabase.from('attendance').upsert({
-        "Employee Id": staffMember["Employee Id"],
-        "Employee Name": staffMember["Employee Name"],
-        "Shop": branch,
-        "Date": today,
-        "status": finalStatus,
-        "Is Paid": false,
-        [type === 'In' ? "Time In" : "Time Out"]: timeString
-      }, { onConflict: 'Employee Id, Date' });
-
-      toast.success(`${type} Success: ${finalStatus}`);
-    } else {
-      await saveAttendanceOffline({
-        "Employee Id": staffMember["Employee Id"],
-        "Employee Name": staffMember["Employee Name"],
-        "Shop": branch,
-        "Date": today,
-        "status": currentStatus,
-        "type": type,
-        "time": timeString
-      });
-      toast.warning("Saved Offline");
-    }
-
-    setStep(1);
-    setFormData({ staffId: '', pin: '' });
-    setLoading(false);
-  };
-
-  if (!mounted) return <div className="min-h-screen bg-slate-950" />;
-
+  // VIEW 2: DISTANCE ERROR
   if (geoError) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
         <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-sm border-b-8 border-red-600">
-          <div className="relative inline-block mb-6">
-            <MapPinOff size={64} className="text-red-600 animate-pulse" />
-            <Navigation2 size={24} className="text-slate-900 absolute -bottom-2 -right-2 rotate-45" />
-          </div>
-          
+          <MapPinOff size={64} className="text-red-600 mx-auto mb-6 animate-pulse" />
           <h1 className="text-3xl font-black uppercase text-slate-900 tracking-tighter">Out of Range</h1>
-          
           <div className="mt-6 p-4 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-             <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">Measured Distance</p>
-             <p className="text-4xl font-black text-red-600 tracking-tighter">
-                {distanceInfo !== null ? `${distanceInfo}m` : 'Calculating...'}
-             </p>
-             <p className="text-[9px] font-bold text-slate-500 mt-2 uppercase">Allowed: Max 500m from {branch}</p>
+             <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Calculated Distance</p>
+             <p className="text-4xl font-black text-red-600 tracking-tighter">{distanceInfo !== null ? `${distanceInfo}m` : 'Checking...'}</p>
           </div>
-
-          <p className="text-slate-400 font-bold mt-6 text-[10px] uppercase leading-relaxed tracking-wider px-4">
-            Please ensure you are at the shop and location permissions are enabled.
-          </p>
-
-          <div className="flex flex-col gap-3 mt-8">
-            <button onClick={() => window.location.reload()} className="bg-slate-900 text-white py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2 hover:bg-blue-600 transition-all">
-                <RefreshCw size={14} /> Refresh My Location
-            </button>
-            <button onClick={() => setGeoError(false)} className="text-slate-300 font-black uppercase text-[8px] tracking-[0.2em] hover:text-red-600 transition-colors">
-                Manager Override
-            </button>
-          </div>
+          <button onClick={() => window.location.reload()} className="mt-8 w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2">
+            <RefreshCw size={14} /> Refresh GPS
+          </button>
+          <button onClick={resetTerminal} className="mt-4 text-[9px] font-black text-slate-300 uppercase tracking-widest hover:text-red-600">Switch Branch Setting</button>
         </div>
     </div>
   );
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-[0_0_60px_rgba(0,0,0,0.5)] overflow-hidden relative border-t-8 border-blue-600">
-        <div className="absolute top-8 right-8 z-20">
-          <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${isOnline ? 'bg-green-50 text-green-600 border-green-200' : 'bg-red-600 text-white animate-pulse'}`}>
-            {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />} {isOnline ? 'Online' : 'Offline'}
-          </div>
-        </div>
-
-        <div className="bg-white p-10 text-center border-b border-slate-100">
-          <div className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-200">
+      <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-2xl overflow-hidden relative border-t-8 border-blue-600">
+        
+        {/* Branch Info Header */}
+        <div className="bg-white p-10 text-center border-b border-slate-50">
+          <div className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg">
              <ShieldCheck className="text-white" size={24} />
           </div>
           <h1 className="text-3xl font-black uppercase italic tracking-tighter text-slate-900 leading-none">
             Kenstar <span className="text-blue-600">Terminal</span>
           </h1>
-          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 mt-3">{branch} Shop</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 mt-3">{SHOP_DATA[activeBranch]?.name}</p>
           
-          <div className="mt-8 bg-slate-900 rounded-[2rem] py-6 px-10 inline-block shadow-xl shadow-slate-200">
-            <span className="text-4xl font-mono font-black tracking-[0.15em] text-white">
-                {currentTime.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+          <div className="mt-6 bg-slate-900 rounded-[2rem] py-4 px-8 inline-block shadow-xl">
+            <span className="text-3xl font-mono font-black text-white tracking-widest">
+                {currentTime.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: false })}
             </span>
           </div>
         </div>
@@ -259,50 +182,36 @@ function TerminalContent() {
         <div className="p-10">
           {step === 1 ? (
             <div className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] ml-4">Staff ID</label>
-                <div className="relative">
-                  <User className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
-                  <input type="text" className="w-full bg-slate-50 border-2 border-slate-100 rounded-[2rem] py-5 pl-14 font-black uppercase outline-none focus:border-blue-600 focus:bg-white transition-all text-slate-900" placeholder="K-000" value={formData.staffId} onChange={(e) => setFormData({...formData, staffId: e.target.value})} />
-                </div>
+              <div className="space-y-4">
+                <input type="text" className="w-full bg-slate-50 border-2 border-slate-100 rounded-[2rem] py-5 px-8 font-black uppercase outline-none focus:border-blue-600 transition-all text-slate-900" placeholder="Staff ID" value={formData.staffId} onChange={(e) => setFormData({...formData, staffId: e.target.value})} />
+                <input type="password" placeholder="PIN" className="w-full bg-slate-50 border-2 border-slate-100 rounded-[2rem] py-5 px-8 font-black tracking-[0.5em] outline-none focus:border-blue-600 transition-all text-slate-900" value={formData.pin} onChange={(e) => setFormData({...formData, pin: e.target.value})} />
               </div>
+              
+              <button onClick={handleVerify} disabled={loading} className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase text-xs shadow-xl active:scale-95 hover:bg-blue-600 transition-all">
+                {loading ? <Loader2 className="animate-spin mx-auto" /> : 'Enter Terminal'}
+              </button>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] ml-4">Security PIN</label>
-                <div className="relative">
-                  <Lock className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
-                  <input type="password" title="PIN" className="w-full bg-slate-50 border-2 border-slate-100 rounded-[2rem] py-5 pl-14 font-black tracking-[1em] outline-none focus:border-blue-600 focus:bg-white transition-all text-slate-900" value={formData.pin} onChange={(e) => setFormData({...formData, pin: e.target.value})} />
-                </div>
-              </div>
-
-              <button onClick={handleVerify} disabled={loading} className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase text-xs shadow-2xl active:scale-95 hover:bg-blue-600 transition-all flex items-center justify-center gap-3 mt-4">
-                {loading ? <Loader2 className="animate-spin" /> : 'Open Terminal'}
+              <button onClick={resetTerminal} className="w-full flex items-center justify-center gap-2 text-[9px] font-black text-slate-300 uppercase tracking-widest hover:text-slate-900 pt-4">
+                <Settings2 size={12} /> Switch Branch Setting
               </button>
             </div>
           ) : (
-            <div className="text-center space-y-8 py-4">
-              <div className="animate-in zoom-in duration-300">
-                <p className="text-[10px] font-black text-blue-600 uppercase tracking-[0.4em] mb-2">Authenticated</p>
-                <h2 className="text-4xl font-black text-slate-900 uppercase tracking-tighter leading-none px-4">{staffMember["Employee Name"]}</h2>
-                <div className="h-1.5 w-12 bg-blue-600 mx-auto mt-6 rounded-full" />
-              </div>
+            <div className="text-center space-y-8 py-4 animate-in zoom-in duration-300">
+                <div>
+                    <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">Authenticated</p>
+                    <h2 className="text-4xl font-black text-slate-900 uppercase tracking-tighter leading-none">{staffMember["Employee Name"]}</h2>
+                </div>
+                
+                <div className="grid grid-cols-1 gap-4 pt-4">
+                    <button onClick={() => { toast.success("In Recorded"); setStep(1); }} className="bg-green-500 text-white py-12 rounded-[2.5rem] font-black uppercase text-2xl shadow-xl active:scale-95">Clock In</button>
+                    <button onClick={() => { toast.success("Out Recorded"); setStep(1); }} className="bg-red-600 text-white py-12 rounded-[2.5rem] font-black uppercase text-2xl shadow-xl active:scale-95">Clock Out</button>
+                </div>
 
-              <div className="grid grid-cols-1 gap-4 pt-4">
-                <button onClick={() => processClock('In')} className="bg-green-500 text-white py-12 rounded-[2.5rem] font-black uppercase text-2xl shadow-xl shadow-green-100 active:scale-95 hover:bg-green-600 transition-all">
-                    Clock In
-                </button>
-                <button onClick={() => processClock('Out')} className="bg-red-600 text-white py-12 rounded-[2.5rem] font-black uppercase text-2xl shadow-xl shadow-red-100 active:scale-95 hover:bg-red-700 transition-all">
-                    Clock Out
-                </button>
-              </div>
-
-              <button onClick={() => setStep(1)} className="text-[10px] font-black text-slate-300 uppercase tracking-widest hover:text-slate-900 transition-colors pt-6 block mx-auto">← Exit Session</button>
+                <button onClick={() => setStep(1)} className="text-[10px] font-black text-slate-300 uppercase tracking-widest hover:text-slate-900 pt-6 block mx-auto">← Exit Session</button>
             </div>
           )}
         </div>
       </div>
-      
-      <p className="mt-8 text-[9px] font-bold text-slate-600 uppercase tracking-[0.4em] opacity-40">KenstarOps ERP v3.0</p>
     </div>
   );
 }
