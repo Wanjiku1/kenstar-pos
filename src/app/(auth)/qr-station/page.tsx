@@ -13,7 +13,6 @@ export default function QRStation() {
     setMounted(true);
   }, []);
 
-  // PERMANENT FIX: All shops centered on Umoja 1 Market coordinates
   const shops = [
     { 
       id: '315', 
@@ -33,8 +32,8 @@ export default function QRStation() {
       id: 'Stage', 
       name: 'Stage Outlet', 
       color: 'bg-green-600', 
-      lat: -1.2825, // Updated from -1.2845 to match market
-      lng: 36.8967  // Updated from 36.8950 to match market
+      lat: -1.2825, 
+      lng: 36.8967 
     }
   ];
 
@@ -47,6 +46,26 @@ export default function QRStation() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-8 font-sans selection:bg-blue-100">
+      {/* Styles to force colors and SVG visibility during print */}
+      <style jsx global>{`
+        @media print {
+          body { background: white !important; }
+          .print-container { 
+            margin: 0 !important; 
+            border: none !important; 
+            box-shadow: none !important;
+            padding: 0 !important;
+          }
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          svg {
+            display: block !important;
+          }
+        }
+      `}</style>
+
       <div className="max-w-4xl mx-auto mb-12 print:hidden">
         <Link href="/admin" className="text-slate-400 hover:text-blue-600 flex items-center gap-2 font-black text-[10px] uppercase mb-8 transition-all group">
           <ChevronLeft size={14} className="group-hover:-translate-x-1 transition-transform" /> 
@@ -96,7 +115,7 @@ export default function QRStation() {
           </button>
 
           {/* PRINTABLE POSTER AREA */}
-          <div className="bg-white w-[210mm] min-h-[297mm] p-16 flex flex-col items-center justify-between border-[20px] border-slate-900 print:shadow-none print:border-[15px] print:m-0 shadow-[0_0_80px_rgba(0,0,0,0.1)] rounded-[4rem] print:rounded-none">
+          <div className="print-container bg-white w-[210mm] min-h-[297mm] p-16 flex flex-col items-center justify-between border-[20px] border-slate-900 print:border-[10px] shadow-[0_0_80px_rgba(0,0,0,0.1)] rounded-[4rem] print:rounded-none">
             <div className="text-center">
               <h2 className="text-8xl font-black italic uppercase tracking-tighter text-slate-900 leading-none">KENSTAR <span className="text-blue-600">OPS</span></h2>
               <div className="h-4 w-48 bg-blue-600 mx-auto mt-8 rounded-full"></div>
@@ -104,11 +123,14 @@ export default function QRStation() {
             </div>
 
             <div className="flex flex-col items-center space-y-12">
-               <div className="p-12 bg-white border-8 border-slate-50 rounded-[5rem] shadow-inner">
+               <div className="p-12 bg-white border-8 border-slate-50 rounded-[5rem] shadow-inner print:border-none">
+                  {/* FORCED COLORS FOR PRINTING */}
                   <QRCode 
                     value={terminalUrl(selectedShop)} 
                     size={420} 
-                    level="H" 
+                    level="H"
+                    bgColor="#FFFFFF"
+                    fgColor="#000000"
                   />
                </div>
                <div className="text-center">
@@ -119,7 +141,7 @@ export default function QRStation() {
                </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-12 w-full border-t-8 border-slate-50 pt-20">
+            <div className="grid grid-cols-3 gap-12 w-full border-t-8 border-slate-50 pt-20 print:pt-10">
               <div className="flex flex-col items-center text-center">
                 <Smartphone className="mb-6 text-blue-600" size={56} />
                 <p className="text-sm font-black uppercase tracking-tighter text-slate-900">1. Scan with Phone</p>
