@@ -13,27 +13,28 @@ export default function QRStation() {
     setMounted(true);
   }, []);
 
+  // PERMANENT FIX: All shops centered on Umoja 1 Market coordinates
   const shops = [
     { 
       id: '315', 
       name: 'Shop 315', 
       color: 'bg-blue-600', 
-      lat: -1.2825, // FIXED: Exact Umoja 1 Market
-      lng: 36.8967  // FIXED: Exact Umoja 1 Market
+      lat: -1.2825, 
+      lng: 36.8967 
     },
     { 
       id: '172', 
       name: 'Shop 172', 
       color: 'bg-slate-900', 
-      lat: -1.2826, 
-      lng: 36.8968 
+      lat: -1.2825, 
+      lng: 36.8967 
     },
     { 
       id: 'Stage', 
       name: 'Stage Outlet', 
       color: 'bg-green-600', 
-      lat: -1.2845, 
-      lng: 36.8950 
+      lat: -1.2825, // Updated from -1.2845 to match market
+      lng: 36.8967  // Updated from 36.8950 to match market
     }
   ];
 
