@@ -18,22 +18,22 @@ export default function QRStation() {
       id: '315', 
       name: 'Shop 315', 
       color: 'bg-blue-600', 
-      lat: -1.283412, // UPDATED: Your exact live coordinates
-      lng: 36.887488  // UPDATED: Your exact live coordinates
+      lat: -1.2825, // FIXED: Exact Umoja 1 Market
+      lng: 36.8967  // FIXED: Exact Umoja 1 Market
     },
     { 
       id: '172', 
       name: 'Shop 172', 
       color: 'bg-slate-900', 
-      lat: -1.283462, 
-      lng: 36.887488 
+      lat: -1.2826, 
+      lng: 36.8968 
     },
     { 
       id: 'Stage', 
       name: 'Stage Outlet', 
       color: 'bg-green-600', 
-      lat: -1.283870, 
-      lng: 36.887865 
+      lat: -1.2845, 
+      lng: 36.8950 
     }
   ];
 

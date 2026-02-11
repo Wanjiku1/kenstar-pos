@@ -57,6 +57,8 @@ function TerminalContent() {
 
   const checkLocation = () => {
     if (targetLat === 0) return;
+    
+    // Using high accuracy and clear cache for Umoja 1 Market environment
     navigator.geolocation.getCurrentPosition((pos) => {
       const lat1 = pos.coords.latitude;
       const lon1 = pos.coords.longitude;
@@ -69,10 +71,14 @@ function TerminalContent() {
       const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
       setDistanceInfo(Math.round(distance));
 
-      // 250m Buffer for Indoor GPS Drift
-      if (distance > 250) setGeoError(true);
+      // BUFFER INCREASED: From 250m to 500m for Market buildings
+      if (distance > 500) setGeoError(true);
       else setGeoError(false);
-    }, () => setGeoError(true), { enableHighAccuracy: true });
+    }, () => setGeoError(true), { 
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0 // Do not use a cached location
+    });
   };
 
   const triggerSync = async () => {
@@ -122,7 +128,6 @@ function TerminalContent() {
     let currentStatus = "On Time";
 
     if (type === 'In') {
-      // STRICT SHIFT LOGIC: 7AM and 8AM (No Grace Period)
       if (hours === 7 && mins > 0) currentStatus = "Late";
       else if (hours > 7 && hours < 8) currentStatus = "Late";
       else if (hours === 8 && mins > 0) currentStatus = "Late";
@@ -130,7 +135,6 @@ function TerminalContent() {
     }
 
     if (isOnline) {
-      // Check morning record for Overtime calculation
       const { data: morningRecord } = await supabase
         .from('attendance')
         .select('*')
@@ -143,10 +147,8 @@ function TerminalContent() {
       if (type === 'Out' && morningRecord?.["Time In"]) {
         const timeIn = new Date(`${today}T${morningRecord["Time In"]}`);
         const hoursWorked = (now.getTime() - timeIn.getTime()) / (1000 * 60 * 60);
-        
-        // Overtime Rule: > 11 Hours
         if (hoursWorked > 11) finalStatus = "Overtime";
-        else finalStatus = morningRecord.status; // Keep 'Late' or 'On Time'
+        else finalStatus = morningRecord.status;
       }
 
       await supabase.from('attendance').upsert({
@@ -180,7 +182,6 @@ function TerminalContent() {
 
   if (!mounted) return <div className="min-h-screen bg-slate-950" />;
 
-  // GEOLOCATION ERROR SCREEN
   if (geoError) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
         <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-sm border-b-8 border-red-600">
@@ -205,15 +206,12 @@ function TerminalContent() {
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-[0_0_60px_rgba(0,0,0,0.5)] overflow-hidden relative border-t-8 border-blue-600">
-        
-        {/* NETWORK STATUS */}
         <div className="absolute top-8 right-8 z-20">
           <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border ${isOnline ? 'bg-green-50 text-green-600 border-green-200' : 'bg-red-600 text-white animate-pulse'}`}>
             {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />} {isOnline ? 'Online' : 'Offline'}
           </div>
         </div>
 
-        {/* HEADER AREA */}
         <div className="bg-white p-10 text-center border-b border-slate-100">
           <div className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-200">
              <ShieldCheck className="text-white" size={24} />
