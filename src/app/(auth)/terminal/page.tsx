@@ -83,7 +83,7 @@ function TerminalContent() {
         setDistanceInfo(roundedDistance);
 
         // 500m Buffer for Market GPS Drift
-        if (roundedDistance > 500) {
+        if (roundedDistance > 1500) {
           setGeoError(true);
         } else {
           setGeoError(false);
