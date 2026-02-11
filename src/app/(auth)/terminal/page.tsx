@@ -1,6 +1,6 @@
 "use client";
 
-export const dynamic = 'force-dynamic'; // Added to prevent caching
+export const dynamic = 'force-dynamic';
 
 import React, { useState, Suspense, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -56,30 +56,51 @@ function TerminalContent() {
   const checkLocation = () => {
     if (targetLat === 0) return;
     
-    navigator.geolocation.getCurrentPosition((pos) => {
-      const lat1 = pos.coords.latitude;
-      const lon1 = pos.coords.longitude;
-      const R = 6371e3; 
-      const dLat = (targetLat - lat1) * Math.PI / 180;
-      const dLon = (targetLng - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat1 * Math.PI/180) * Math.cos(targetLat * Math.PI/180) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      
-      const roundedDistance = Math.round(distance);
-      setDistanceInfo(roundedDistance);
-
-      // 500m Buffer for Market GPS Drift
-      if (roundedDistance > 500) {
+    // Safety timeout to prevent "Calculating..." hanging forever
+    const timeoutId = setTimeout(() => {
+      if (distanceInfo === null) {
         setGeoError(true);
-      } else {
-        setGeoError(false);
+        toast.error("GPS taking too long. Move to an open area.");
       }
-    }, () => setGeoError(true), { 
-      enableHighAccuracy: true,
-      maximumAge: 0 
-    });
+    }, 12000);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        clearTimeout(timeoutId);
+        const lat1 = pos.coords.latitude;
+        const lon1 = pos.coords.longitude;
+        
+        // Haversine Formula
+        const R = 6371e3; 
+        const dLat = (targetLat - lat1) * Math.PI / 180;
+        const dLon = (targetLng - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI/180) * Math.cos(targetLat * Math.PI/180) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        
+        const roundedDistance = Math.round(distance);
+        setDistanceInfo(roundedDistance);
+
+        // 500m Buffer for Market GPS Drift
+        if (roundedDistance > 500) {
+          setGeoError(true);
+        } else {
+          setGeoError(false);
+        }
+      },
+      (err) => {
+        clearTimeout(timeoutId);
+        setGeoError(true);
+        console.error("GPS Error:", err.message);
+        toast.error(`GPS Error: ${err.message}`);
+      },
+      { 
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0 
+      }
+    );
   };
 
   const triggerSync = async () => {
@@ -125,11 +146,8 @@ function TerminalContent() {
     const today = now.toISOString().split('T')[0];
 
     let currentStatus = "On Time";
-    const hours = now.getHours();
-    const mins = now.getMinutes();
-
-    if (type === 'In') {
-      if (hours >= 7 && mins > 0) currentStatus = "Late";
+    if (type === 'In' && (now.getHours() >= 7 && now.getMinutes() > 0)) {
+      currentStatus = "Late";
     }
 
     if (isOnline) {
@@ -169,7 +187,7 @@ function TerminalContent() {
         "type": type,
         "time": timeString
       });
-      toast.warning("Offline: Saved to Local Storage");
+      toast.warning("Saved Offline");
     }
 
     setStep(1);
@@ -179,7 +197,6 @@ function TerminalContent() {
 
   if (!mounted) return <div className="min-h-screen bg-slate-950" />;
 
-  // UPDATED GEOLOCATION ERROR SCREEN
   if (geoError) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
         <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-sm border-b-8 border-red-600">
@@ -199,7 +216,7 @@ function TerminalContent() {
           </div>
 
           <p className="text-slate-400 font-bold mt-6 text-[10px] uppercase leading-relaxed tracking-wider px-4">
-            Please move closer to the shop entrance or step outside for a better GPS signal.
+            Please ensure you are at the shop and location permissions are enabled.
           </p>
 
           <div className="flex flex-col gap-3 mt-8">
