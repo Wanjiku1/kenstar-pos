@@ -3,15 +3,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
-  Loader2, MapPinOff, CheckCircle2, Clock, WifiOff, 
-  RefreshCw, Database, UserCheck, Settings2, AlertTriangle 
+  Loader2, MapPinOff, CheckCircle2, WifiOff, RefreshCw, 
+  Database, UserCheck, Settings2, AlertTriangle, MapPin
 } from 'lucide-react'; 
 import { toast } from 'sonner';
 
-const SHOP_DATA: Record<string, { lat: number; lng: number; name: string; color: string }> = {
-  '315': { lat: -1.283519, lng: 36.887452, name: 'Kenstar 315', color: 'bg-green-700' },
-  '172': { lat: -1.283215, lng: 36.887374, name: 'Kenstar 172', color: 'bg-slate-900' },
-  'Stage': { lat: -1.283971, lng: 36.887177, name: 'Stage Outlet', color: 'bg-[#007a43]' }
+const SHOP_DATA: Record<string, { lat: number; lng: number; name: string }> = {
+  '315': { lat: -1.283519, lng: 36.887452, name: 'Kenstar 315' },
+  '172': { lat: -1.283215, lng: 36.887374, name: 'Kenstar 172' },
+  'Stage': { lat: -1.283971, lng: 36.887177, name: 'Stage Outlet' }
 };
 
 export default function TerminalPage() {
@@ -22,7 +22,7 @@ export default function TerminalPage() {
   const [activeBranch, setActiveBranch] = useState<string | null>(null);
   const [targetCoords, setTargetCoords] = useState<{lat: number, lng: number} | null>(null);
   const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
-  const [step, setStep] = useState(1); // 0: Select Branch, 1: Login, 2: Action, 3: Success
+  const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [geoError, setGeoError] = useState(false);
   const [distanceInfo, setDistanceInfo] = useState<number | null>(null);
@@ -30,7 +30,7 @@ export default function TerminalPage() {
   const [staffMember, setStaffMember] = useState<any>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedShift, setSelectedShift] = useState<string | null>(null);
-  const [punchResult, setPunchResult] = useState<{status: string, message: string} | null>(null);
+  const [punchResult, setPunchResult] = useState<{status: string, message: string, type: string} | null>(null);
 
   const syncOfflineRecords = useCallback(async () => {
     const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
@@ -50,31 +50,52 @@ export default function TerminalPage() {
     setIsSyncing(false);
   }, []);
 
+  const resetTerminal = useCallback(() => {
+    setStep(1);
+    setFormData({ staffId: '', pin: '' });
+    setSelectedShift(null);
+    setPunchResult(null);
+  }, []);
+
+  useEffect(() => {
+    if (step === 3) {
+      const timer = setTimeout(() => resetTerminal(), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [step, resetTerminal]);
+
   useEffect(() => {
     setMounted(true);
     setIsOnline(navigator.onLine);
-    const goOnline = () => { setIsOnline(true); syncOfflineRecords(); };
-    const goOffline = () => setIsOnline(false);
-    window.addEventListener('online', goOnline);
-    window.addEventListener('offline', goOffline);
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    
     const saved = localStorage.getItem('kenstar_saved_branch');
     if (saved && SHOP_DATA[saved]) {
       setActiveBranch(saved);
       setTargetCoords({ lat: SHOP_DATA[saved].lat, lng: SHOP_DATA[saved].lng });
     } else {
-      setStep(0); // Force branch selection if none saved
+      setStep(0);
     }
+    return () => clearInterval(timer);
+  }, []);
 
-    if (navigator.onLine) {
-       supabase.from('staff').select('*').then(({ data }) => {
-         if (data) localStorage.setItem('kenstar_staff_cache', JSON.stringify(data));
-       });
-       syncOfflineRecords();
-    }
-    return () => { clearInterval(timer); window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
-  }, [syncOfflineRecords]);
+  const checkLocation = useCallback(() => {
+    if (!targetCoords || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const lat1 = pos.coords.latitude;
+      const lon1 = pos.coords.longitude;
+      setUserCoords({ lat: lat1, lng: lon1 });
+      
+      const R = 6371e3; 
+      const dLat = (targetCoords.lat - lat1) * Math.PI / 180;
+      const dLon = (targetCoords.lng - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI/180) * Math.cos(targetCoords.lat * Math.PI/180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+      const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      
+      setDistanceInfo(Math.round(d));
+      // TIGHT GEOFENCE: 50 meters (Stage and 315 are approx 60-80m apart)
+      setGeoError(d > 50); 
+    }, () => setGeoError(true), { enableHighAccuracy: true });
+  }, [targetCoords]);
 
   const selectBranch = (id: string) => {
     localStorage.setItem('kenstar_saved_branch', id);
@@ -86,53 +107,35 @@ export default function TerminalPage() {
   const handleVerify = async () => {
     if (!formData.staffId || !formData.pin) return toast.error("Enter Credentials");
     setLoading(true);
-    const inputId = formData.staffId.trim().toUpperCase();
-    const inputPin = formData.pin.trim();
-
-    if (!isOnline) {
-      const cached = JSON.parse(localStorage.getItem('kenstar_staff_cache') || '[]');
-      const user = cached.find((s: any) => s["Employee Id"] === inputId && String(s.pin) === inputPin);
-      if (user) { setStaffMember(user); setStep(2); checkLocation(); } 
-      else { toast.error("Credentials not in cache"); }
-      setLoading(false); return;
-    }
-
-    const { data, error } = await supabase.from('staff').select('*').eq('Employee Id', inputId).eq('pin', inputPin).single();
-    if (error || !data) { toast.error("Invalid Credentials"); } 
-    else { setStaffMember(data); setStep(2); checkLocation(); }
-    setLoading(false);
-  };
-
-  const checkLocation = () => {
-    if (!targetCoords || !navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition((pos) => {
-      const lat1 = pos.coords.latitude; const lon1 = pos.coords.longitude;
-      setUserCoords({ lat: lat1, lng: lon1 });
-      const R = 6371e3; 
-      const dLat = (targetCoords.lat - lat1) * Math.PI / 180;
-      const dLon = (targetCoords.lng - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI/180) * Math.cos(targetCoords.lat * Math.PI/180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-      const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      setDistanceInfo(Math.round(distance));
-      setGeoError(distance > 150); 
-    }, () => setGeoError(true), { enableHighAccuracy: true });
+    try {
+      const { data, error } = await supabase.from('staff').select('*').eq('Employee Id', formData.staffId.trim().toUpperCase()).eq('pin', formData.pin.trim()).single();
+      if (error || !data) {
+        toast.error("Invalid Credentials");
+      } else {
+        setStaffMember(data);
+        setStep(2);
+        checkLocation();
+      }
+    } catch (err) { toast.error("Network Error"); } finally { setLoading(false); }
   };
 
   const processClock = async (type: 'In' | 'Out') => {
-    if (type === 'In' && !selectedShift) return toast.error("Select Shift");
-    setLoading(true);
+    if (type === 'In' && !selectedShift) return toast.error("Select Shift First");
     
+    // FINAL SAFETY CHECK: If still too far, block the function
+    if (distanceInfo && distanceInfo > 50) {
+       return toast.error(`You are ${distanceInfo}m away. Move closer to the shop.`);
+    }
+
+    setLoading(true);
     const now = new Date();
     const timeString = now.toLocaleTimeString('en-GB', { hour12: false });
-    const [hours, minutes] = timeString.split(':').map(Number);
+    const [hours, mins] = timeString.split(':').map(Number);
     
-    // Lateness Logic
-    let punctuality = "On Time";
+    let status = "On Time";
     if (type === 'In') {
-      const limit = selectedShift === "7AM Shift" ? 7 : 8;
-      if (hours > limit || (hours === limit && minutes > 5)) {
-        punctuality = "Late Arrival";
-      }
+      const hourLimit = selectedShift === "7AM Shift" ? 7 : 8;
+      if (hours > hourLimit || (hours === hourLimit && mins > 5)) status = "Late Arrival";
     }
 
     const record = {
@@ -145,21 +148,17 @@ export default function TerminalPage() {
       "lng": userCoords?.lng || 0,
       "Worked At": type === 'In' ? selectedShift : "Clock Out",
       [type === 'In' ? "Time In" : "Time Out"]: timeString,
-      "Notes": type === 'In' ? punctuality : ""
+      "Notes": status
     };
 
-    if (!isOnline) {
-      const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
-      queue.push(record);
-      localStorage.setItem('kenstar_offline_queue', JSON.stringify(queue));
-      setPunchResult({ status: punctuality, message: `Clocked ${type} (Stored Offline)` });
+    const { error } = await supabase.from('attendance').upsert(record, { onConflict: 'Employee Id, Date' });
+    
+    if (!error) {
+      setPunchResult({ status, message: "Success", type });
       setStep(3);
     } else {
-      const { error } = await supabase.from('attendance').upsert(record, { onConflict: 'Employee Id, Date' });
-      if (!error) {
-        setPunchResult({ status: punctuality, message: `Clocked ${type} Successfully` });
-        setStep(3);
-      } else { toast.error("Sync Error"); }
+      console.error("Supabase Sync Error:", error);
+      toast.error(`Sync Error: ${error.message}. Check table columns.`);
     }
     setLoading(false);
   };
@@ -167,20 +166,17 @@ export default function TerminalPage() {
   if (!mounted) return null;
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 font-sans">
-      {/* STATUS OVERLAYS */}
-      {!isOnline && <div className="fixed top-0 inset-x-0 bg-orange-600 text-white text-[10px] font-black uppercase py-2 flex items-center justify-center gap-2 z-[60]"><WifiOff size={12}/> Offline Mode</div>}
-
-      <div className="w-full max-w-md bg-white rounded-[3rem] shadow-2xl p-8">
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-2xl p-10 min-h-[550px] flex flex-col justify-center relative overflow-hidden">
+        
         {/* STEP 0: BRANCH SELECTION */}
         {step === 0 && (
           <div className="space-y-6">
-            <h1 className="text-2xl font-black text-center uppercase tracking-tighter">Setup Terminal</h1>
-            <p className="text-center text-slate-400 text-sm">Select the current shop location:</p>
-            <div className="grid gap-4">
+            <h1 className="text-2xl font-black text-center uppercase italic">Kenstar <span className="text-[#007a43]">Setup</span></h1>
+            <div className="grid gap-3">
               {Object.entries(SHOP_DATA).map(([id, data]) => (
-                <button key={id} onClick={() => selectBranch(id)} className="w-full p-6 rounded-2xl border-2 border-slate-100 hover:border-[#007a43] text-left font-black uppercase flex justify-between items-center group">
-                  {data.name} <Settings2 className="opacity-0 group-hover:opacity-100 text-[#007a43]" />
+                <button key={id} onClick={() => selectBranch(id)} className="p-6 rounded-2xl border-2 border-slate-100 hover:border-[#007a43] font-black uppercase flex justify-between">
+                  {data.name} <Settings2 className="text-[#007a43]" />
                 </button>
               ))}
             </div>
@@ -190,61 +186,63 @@ export default function TerminalPage() {
         {/* STEP 1: LOGIN */}
         {step === 1 && (
           <div className="space-y-4">
-            <div className="text-center mb-8">
-              <h1 className="text-3xl font-black uppercase italic text-slate-900 leading-none">Kenstar <span className="text-[#007a43]">Uniforms</span></h1>
-              <p className="text-[10px] font-black uppercase text-slate-400 mt-4 tracking-[0.2em]">{SHOP_DATA[activeBranch!]?.name}</p>
+            <div className="text-center mb-6">
+              <h1 className="text-3xl font-black uppercase italic text-slate-900">Kenstar <span className="text-[#007a43]">Uniforms</span></h1>
+              <p className="text-[10px] font-black uppercase text-slate-400 mt-2 tracking-widest">{SHOP_DATA[activeBranch!]?.name}</p>
             </div>
             <input type="text" className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-5 px-8 font-black uppercase" placeholder="STAFF ID" value={formData.staffId} onChange={(e) => setFormData({...formData, staffId: e.target.value})} />
-            <input type="password" placeholder="PIN" className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-5 px-8 font-black text-center text-2xl tracking-widest" value={formData.pin} onChange={(e) => setFormData({...formData, pin: e.target.value})} />
+            <input type="password" placeholder="PIN" className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-5 px-8 font-black text-center text-2xl" value={formData.pin} onChange={(e) => setFormData({...formData, pin: e.target.value})} />
             <button onClick={handleVerify} disabled={loading} className="w-full bg-[#007a43] text-white py-6 rounded-2xl font-black uppercase flex items-center justify-center gap-2">
               {loading ? <Loader2 className="animate-spin" /> : <UserCheck size={20} />} Identify Staff
             </button>
-            <button onClick={() => setStep(0)} className="w-full text-[10px] font-black text-slate-300 uppercase underline mt-4 flex items-center justify-center gap-1">
-              <Settings2 size={12}/> Terminal Settings (Switch Branch)
-            </button>
+            <button onClick={() => setStep(0)} className="w-full text-[10px] font-black text-slate-300 uppercase underline mt-4">Switch Branch</button>
           </div>
         )}
 
-        {/* STEP 2: CLOCKING */}
+        {/* STEP 2: CLOCKING (The Geofence Shield) */}
         {step === 2 && (
-          <div className="text-center space-y-6 animate-in fade-in zoom-in duration-300">
-             <div className="bg-green-50 py-5 rounded-2xl border-2 border-green-100">
-              <p className="text-[10px] font-black text-[#007a43] uppercase mb-1">Identified</p>
+          <div className="text-center space-y-6">
+            <div className="bg-green-50 py-4 rounded-2xl border-2 border-green-100">
               <h2 className="text-xl font-black text-slate-900 uppercase">{staffMember["Employee Name"]}</h2>
+              <div className="flex items-center justify-center gap-2 mt-1">
+                <MapPin size={12} className={geoError ? "text-red-500" : "text-green-600"} />
+                <span className={`text-[10px] font-bold uppercase ${geoError ? "text-red-500" : "text-green-600"}`}>
+                  {distanceInfo ? `${distanceInfo}m from shop` : "Locating..."}
+                  {geoError && " (Too Far)"}
+                </span>
+              </div>
             </div>
+            
             <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => setSelectedShift("7AM Shift")} className={`py-4 rounded-2xl font-black uppercase text-xs border-2 ${selectedShift === '7AM Shift' ? 'bg-[#007a43] text-white border-[#007a43]' : 'bg-white text-slate-400'}`}>7:00 AM</button>
-              <button onClick={() => setSelectedShift("8AM Shift")} className={`py-4 rounded-2xl font-black uppercase text-xs border-2 ${selectedShift === '8AM Shift' ? 'bg-[#007a43] text-white border-[#007a43]' : 'bg-white text-slate-400'}`}>8:00 AM</button>
+              <button onClick={() => setSelectedShift("7AM Shift")} className={`py-4 rounded-2xl font-black uppercase text-xs border-2 ${selectedShift === '7AM Shift' ? 'bg-[#007a43] text-white' : 'bg-white text-slate-400'}`}>7:00 AM</button>
+              <button onClick={() => setSelectedShift("8AM Shift")} className={`py-4 rounded-2xl font-black uppercase text-xs border-2 ${selectedShift === '8AM Shift' ? 'bg-[#007a43] text-white' : 'bg-white text-slate-400'}`}>8:00 AM</button>
             </div>
+
             <div className="grid gap-4">
-              <button onClick={() => processClock('In')} className="bg-[#007a43] text-white py-10 rounded-[2.5rem] font-black text-2xl uppercase">Clock In</button>
+              <button 
+                onClick={() => processClock('In')} 
+                disabled={geoError || loading || !distanceInfo}
+                className={`py-10 rounded-[2.5rem] font-black text-3xl uppercase transition-all ${geoError ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-[#007a43] text-white shadow-xl active:scale-95'}`}
+              >
+                {geoError ? "Out of Range" : "Clock In"}
+              </button>
               <button onClick={() => processClock('Out')} className="bg-slate-900 text-white py-6 rounded-[2rem] font-black text-xl uppercase">Clock Out</button>
             </div>
+            <button onClick={() => setStep(1)} className="text-slate-300 font-black uppercase underline text-[10px]">Cancel</button>
           </div>
         )}
 
-        {/* STEP 3: SUCCESS / FEEDBACK */}
+        {/* STEP 3: SUCCESS */}
         {step === 3 && (
-          <div className="text-center space-y-6 py-4 animate-in zoom-in duration-500">
-            {punchResult?.status === "On Time" ? (
-              <CheckCircle2 size={80} className="text-green-500 mx-auto" />
-            ) : (
-              <AlertTriangle size={80} className="text-orange-500 mx-auto" />
-            )}
-            <div>
-              <h2 className={`text-3xl font-black uppercase ${punchResult?.status === "On Time" ? 'text-green-600' : 'text-orange-600'}`}>
-                {punchResult?.status}
-              </h2>
-              <p className="text-slate-400 font-bold mt-2">{punchResult?.message}</p>
-            </div>
-            <button onClick={() => { setStep(1); setFormData({staffId:'', pin:''}); }} className="w-full bg-slate-900 text-white py-6 rounded-2xl font-black uppercase mt-4">Close Terminal</button>
+          <div className="text-center space-y-4">
+            <CheckCircle2 size={80} className="text-green-500 mx-auto animate-bounce" />
+            <h2 className="text-3xl font-black uppercase text-green-600">{punchResult?.status}</h2>
+            <p className="text-2xl font-black text-slate-800 uppercase italic">
+              {punchResult?.type === 'In' ? "Have a good day!" : "Goodbye & Stay Safe!"}
+            </p>
+            <button onClick={resetTerminal} className="w-full bg-slate-900 text-white py-6 rounded-2xl font-black uppercase mt-4">Finish</button>
           </div>
         )}
-      </div>
-
-      <div className="mt-8 text-white/40 flex flex-col items-center gap-1">
-        <div className="font-mono text-2xl font-black">{currentTime.toLocaleTimeString('en-KE', { hour12: false })}</div>
-        <p className="text-[9px] font-black uppercase tracking-widest">Kenstar Uniforms ERP v1.2.0</p>
       </div>
     </div>
   );
