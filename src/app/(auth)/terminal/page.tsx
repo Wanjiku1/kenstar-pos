@@ -3,8 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
-  Loader2, MapPinOff, CheckCircle2, WifiOff, RefreshCw, 
-  Database, UserCheck, Settings2, AlertTriangle, MapPin
+  Loader2, CheckCircle2, UserCheck, Settings2, AlertTriangle, MapPin, WifiOff, Globe 
 } from 'lucide-react'; 
 import { toast } from 'sonner';
 
@@ -32,6 +31,68 @@ export default function TerminalPage() {
 
   const isSunday = currentTime.getDay() === 0;
 
+  // --- OFFLINE SYNC LOGIC ---
+  const syncOfflineRecords = useCallback(async () => {
+    const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
+    if (queue.length === 0) return;
+
+    console.log("Attempting automatic sync...");
+    let successCount = 0;
+    
+    for (const record of queue) {
+      const { error } = await supabase.from('attendance').upsert(record, { onConflict: 'Employee Id, Date' });
+      if (!error) successCount++;
+    }
+
+    if (successCount > 0) {
+      toast.success(`Automatically synced ${successCount} offline records!`);
+      localStorage.setItem('kenstar_offline_queue', '[]');
+    }
+  }, []);
+
+  // Cache staff for offline login
+  const updateStaffCache = useCallback(async () => {
+    if (!navigator.onLine) return;
+    const { data } = await supabase.from('staff').select('*');
+    if (data) localStorage.setItem('kenstar_staff_cache', JSON.stringify(data));
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+    setIsOnline(navigator.onLine);
+
+    // Automatic Sync Listeners
+    const handleOnline = () => {
+      setIsOnline(true);
+      syncOfflineRecords();
+      updateStaffCache();
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    const saved = localStorage.getItem('kenstar_saved_branch');
+    if (saved) {
+      setActiveBranch(saved);
+      setTargetCoords({ lat: SHOP_DATA[saved].lat, lng: SHOP_DATA[saved].lng });
+    } else {
+      setStep(0);
+    }
+
+    if (navigator.onLine) {
+        updateStaffCache();
+        syncOfflineRecords();
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      clearInterval(timer);
+    };
+  }, [syncOfflineRecords, updateStaffCache]);
+
   const resetTerminal = useCallback(() => {
     setStep(1);
     setFormData({ staffId: '', pin: '' });
@@ -45,20 +106,6 @@ export default function TerminalPage() {
       return () => clearTimeout(timer);
     }
   }, [step, resetTerminal]);
-
-  useEffect(() => {
-    setMounted(true);
-    setIsOnline(navigator.onLine);
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    const saved = localStorage.getItem('kenstar_saved_branch');
-    if (saved && SHOP_DATA[saved]) {
-      setActiveBranch(saved);
-      setTargetCoords({ lat: SHOP_DATA[saved].lat, lng: SHOP_DATA[saved].lng });
-    } else {
-      setStep(0);
-    }
-    return () => clearInterval(timer);
-  }, []);
 
   const checkLocation = useCallback(() => {
     if (!targetCoords || !navigator.geolocation) return;
@@ -86,16 +133,37 @@ export default function TerminalPage() {
   const handleVerify = async () => {
     if (!formData.staffId || !formData.pin) return toast.error("Enter Credentials");
     setLoading(true);
-    try {
-      const { data, error } = await supabase.from('staff').select('*').eq('Employee Id', formData.staffId.trim().toUpperCase()).eq('pin', formData.pin.trim()).single();
-      if (error || !data) {
-        toast.error("Invalid Credentials");
-      } else {
-        setStaffMember(data);
-        setStep(2);
-        checkLocation();
-      }
-    } catch (err) { toast.error("Network Error"); } finally { setLoading(false); }
+
+    const idInput = formData.staffId.trim().toUpperCase();
+    const pinInput = formData.pin.trim();
+
+    // 1. Try Online Verification
+    if (isOnline) {
+      try {
+        const { data, error } = await supabase.from('staff').select('*').eq('Employee Id', idInput).eq('pin', pinInput).single();
+        if (data && !error) {
+          setStaffMember(data);
+          setStep(2);
+          checkLocation();
+          setLoading(false);
+          return;
+        }
+      } catch (e) { /* fall through to offline check */ }
+    }
+
+    // 2. Offline Fallback Check
+    const cache = JSON.parse(localStorage.getItem('kenstar_staff_cache') || '[]');
+    const matched = cache.find((s: any) => s["Employee Id"] === idInput && s["pin"] === pinInput);
+
+    if (matched) {
+      setStaffMember(matched);
+      setStep(2);
+      checkLocation();
+      if (!isOnline) toast.info("Login successful (Offline Mode)");
+    } else {
+      toast.error(isOnline ? "Invalid Credentials" : "Credentials not found in offline cache");
+    }
+    setLoading(false);
   };
 
   const processClock = async (type: 'In' | 'Out') => {
@@ -111,11 +179,7 @@ export default function TerminalPage() {
     if (type === 'In') {
       let limit = selectedShift === "7AM Shift" ? 7 : 8;
       if (selectedShift === "Sunday Shift") limit = 11;
-      
-      // STRICT: Late if mins > 0 or hours > limit
-      if (hours > limit || (hours === limit && mins > 0)) {
-        status = "Late Arrival";
-      }
+      if (hours > limit || (hours === limit && mins > 0)) status = "Late Arrival";
     } else {
       status = "Shift Ended";
     }
@@ -133,13 +197,21 @@ export default function TerminalPage() {
       "Notes": status
     };
 
-    const { error } = await supabase.from('attendance').upsert(record, { onConflict: 'Employee Id, Date' });
-    
-    if (!error) {
-      setPunchResult({ status, message: "Success", type });
-      setStep(3);
+    if (isOnline) {
+      const { error } = await supabase.from('attendance').upsert(record, { onConflict: 'Employee Id, Date' });
+      if (!error) {
+        setPunchResult({ status, message: "Success", type });
+        setStep(3);
+      } else {
+        toast.error("Cloud Sync Failed");
+      }
     } else {
-      toast.error(`Sync Error: ${error.message}`);
+      // Save to Offline Queue
+      const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
+      localStorage.setItem('kenstar_offline_queue', JSON.stringify([...queue, record]));
+      setPunchResult({ status, message: "Offline Success", type });
+      setStep(3);
+      toast.warning("Saved locally. Will sync when internet returns.");
     }
     setLoading(false);
   };
@@ -148,6 +220,12 @@ export default function TerminalPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
+      {/* Network Status Indicator */}
+      <div className={`fixed top-6 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 ${isOnline ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+        {isOnline ? <Globe size={12}/> : <WifiOff size={12}/>}
+        {isOnline ? 'Network Online' : 'Offline Mode'}
+      </div>
+
       <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-2xl p-10 min-h-[550px] flex flex-col justify-center relative overflow-hidden">
         
         {step === 0 && (
@@ -231,7 +309,7 @@ export default function TerminalPage() {
                   {punchResult?.status}
                 </h2>
               )}
-              <p className="text-2xl font-black text-slate-800 uppercase">
+              <p className="text-2xl font-black text-slate-800 uppercase leading-tight">
                 {punchResult?.type === 'In' 
                   ? (punchResult.status === 'Late Arrival' ? "Please be on time tomorrow!" : "Have a good day!")
                   : "Goodbye & Stay Safe!"}
