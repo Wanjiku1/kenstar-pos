@@ -82,48 +82,66 @@ export default function TerminalPage() {
     setLoading(true);
     const now = new Date();
     const timeString = now.toLocaleTimeString('en-GB', { hour12: false });
-    const hrs = now.getHours();
-    const mins = now.getMinutes();
-    const secs = now.getSeconds();
+    const dateString = now.toISOString().split('T')[0];
     
-    let status = "On Time";
+    let statusValue = "On Time";
     if (type === 'In') {
+      const hrs = now.getHours();
+      const mins = now.getMinutes();
+      const secs = now.getSeconds();
+      
       if (selectedShift === '7AM Shift') {
-        if (hrs > 7 || (hrs === 7 && (mins > 0 || secs > 0))) status = "Late";
+        if (hrs > 7 || (hrs === 7 && (mins > 0 || secs > 0))) statusValue = "Late";
       } else if (selectedShift === '8AM Shift') {
-        if (hrs > 8 || (hrs === 8 && (mins > 0 || secs > 0))) status = "Late";
+        if (hrs > 8 || (hrs === 8 && (mins > 0 || secs > 0))) statusValue = "Late";
       } else if (selectedShift === 'Sunday Shift') {
-        if (hrs > 11 || (hrs === 11 && (mins > 0 || secs > 0))) status = "Late";
+        if (hrs > 11 || (hrs === 11 && (mins > 0 || secs > 0))) statusValue = "Late";
       }
     }
 
-    const record = {
+    // Build record matching your EXACT schema
+    const record: any = {
       "Employee Id": staffMember["Employee Id"],
       "Employee Name": staffMember["Employee Name"],
       "Shop": SHOP_DATA[activeBranch!]?.name,
-      "Date": now.toISOString().split('T')[0],
-      "status": status,
-      "shift": selectedShift || "N/A",
-      [type === 'In' ? "Time In" : "Time Out"]: timeString,
+      "Date": dateString,
+      "status": statusValue,
       "lat": userCoords?.lat || 0,
-      "lng": userCoords?.lng || 0
+      "lng": userCoords?.lng || 0,
+      "Worked At": selectedShift || "Clock Out", // Store shift here since column 'shift' doesn't exist
     };
 
-    const { error } = await supabase.from('attendance').insert(record);
+    if (type === 'In') {
+      record["Time In"] = timeString;
+    } else {
+      record["Time Out"] = timeString;
+    }
+
+    // UPSERT is required because of your unique_staff_attendance constraint
+    const { error } = await supabase
+      .from('attendance')
+      .upsert(record, { onConflict: 'Employee Id, Date' });
+
     if (!error) {
       toast.custom((t) => (
-        <div className={`bg-white border-l-8 ${status === 'Late' ? 'border-red-600' : 'border-green-500'} p-6 rounded-2xl shadow-2xl flex items-center gap-4`}>
-          {status === 'Late' ? <Clock className="text-red-600" /> : <CheckCircle2 className="text-green-500" />}
+        <div className={`bg-white border-l-8 ${statusValue === 'Late' && type === 'In' ? 'border-red-600' : 'border-green-500'} p-6 rounded-2xl shadow-2xl flex items-center gap-4`}>
+          {statusValue === 'Late' && type === 'In' ? <Clock className="text-red-600" /> : <CheckCircle2 className="text-green-500" />}
           <div>
-            <p className="font-black text-slate-900 uppercase">{type} SUCCESSFUL</p>
-            <p className="text-xs font-bold text-slate-500">{status} ({selectedShift})</p>
+            <p className="font-black text-slate-900 uppercase tracking-tighter">{type} RECORDED</p>
+            <p className="text-xs font-bold text-slate-500 uppercase">
+              {type === 'In' ? `${statusValue} for ${selectedShift}` : 'Shift Ended'}
+            </p>
           </div>
         </div>
-      ));
+      ), { duration: 5000 });
+
       setStep(1);
       setFormData({ staffId: '', pin: '' });
       setSelectedShift(null);
-    } else { toast.error("Error saving record"); }
+    } else { 
+      console.error("Supabase Error:", error);
+      toast.error(`Error: ${error.message}`); 
+    }
     setLoading(false);
   };
 
@@ -133,7 +151,6 @@ export default function TerminalPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-      {/* ACCESS DENIED SCREEN */}
       {geoError && (
         <div className="fixed inset-0 bg-slate-950 z-50 flex items-center justify-center p-6">
            <div className="bg-white p-10 rounded-[3rem] text-center max-w-sm">
@@ -149,16 +166,16 @@ export default function TerminalPage() {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-black uppercase italic text-slate-900">Kenstar <span className="text-blue-600">Ops</span></h1>
           <p className="text-[10px] font-black uppercase text-slate-400 mt-2">{SHOP_DATA[activeBranch!]?.name || "Terminal"}</p>
-          <div className="mt-4 bg-slate-900 text-white py-4 px-8 rounded-3xl inline-block font-mono text-3xl font-black">
+          <div className="mt-4 bg-slate-900 text-white py-4 px-8 rounded-3xl inline-block font-mono text-3xl font-black shadow-lg">
             {currentTime.toLocaleTimeString('en-KE', { hour12: false })}
           </div>
         </div>
 
         {step === 1 ? (
           <div className="space-y-6">
-            <input type="text" className="w-full bg-slate-100 rounded-2xl py-6 px-8 font-black uppercase border-none outline-none" placeholder="STAFF ID" value={formData.staffId} onChange={(e) => setFormData({...formData, staffId: e.target.value})} />
-            <input type="password" placeholder="PIN" className="w-full bg-slate-100 rounded-2xl py-6 px-8 font-black border-none outline-none" value={formData.pin} onChange={(e) => setFormData({...formData, pin: e.target.value})} />
-            <button onClick={handleVerify} disabled={loading} className="w-full bg-slate-900 text-white py-6 rounded-2xl font-black uppercase shadow-xl">
+            <input type="text" className="w-full bg-slate-100 rounded-2xl py-6 px-8 font-black uppercase border-none outline-none focus:ring-2 ring-blue-600" placeholder="STAFF ID" value={formData.staffId} onChange={(e) => setFormData({...formData, staffId: e.target.value})} />
+            <input type="password" placeholder="PIN" className="w-full bg-slate-100 rounded-2xl py-6 px-8 font-black border-none outline-none focus:ring-2 ring-blue-600" value={formData.pin} onChange={(e) => setFormData({...formData, pin: e.target.value})} />
+            <button onClick={handleVerify} disabled={loading} className="w-full bg-slate-900 text-white py-6 rounded-2xl font-black uppercase shadow-xl hover:bg-slate-800 transition-all">
               {loading ? <Loader2 className="animate-spin mx-auto" /> : 'Identify Staff'}
             </button>
             <button onClick={() => { localStorage.removeItem('kenstar_saved_branch'); setActiveBranch(null); }} className="w-full text-[10px] font-black text-slate-300 uppercase underline">Change Branch</button>
@@ -166,10 +183,9 @@ export default function TerminalPage() {
         ) : (
           <div className="text-center space-y-6">
             <div className="bg-blue-50 py-4 rounded-2xl">
-              <h2 className="text-2xl font-black text-slate-900 uppercase">{staffMember["Employee Name"]}</h2>
+              <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">{staffMember["Employee Name"]}</h2>
             </div>
 
-            {/* SHIFT SELECTION */}
             <div className="space-y-2">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Your Shift</p>
               <div className="grid grid-cols-1 gap-3">
@@ -185,10 +201,10 @@ export default function TerminalPage() {
             </div>
 
             <div className="grid gap-3 pt-4">
-              <button onClick={() => processClock('In')} className="bg-green-500 text-white py-10 rounded-[2rem] font-black text-2xl uppercase shadow-xl">Clock In</button>
-              <button onClick={() => { setSelectedShift("Clocking Out"); processClock('Out'); }} className="bg-red-600 text-white py-6 rounded-[2rem] font-black text-xl uppercase shadow-lg">Clock Out</button>
+              <button onClick={() => processClock('In')} className="bg-green-500 text-white py-10 rounded-[2rem] font-black text-2xl uppercase shadow-xl hover:bg-green-600 active:scale-95 transition-all">Clock In</button>
+              <button onClick={() => { setSelectedShift("Clocking Out"); processClock('Out'); }} className="bg-red-600 text-white py-6 rounded-[2rem] font-black text-xl uppercase shadow-lg hover:bg-red-700 active:scale-95 transition-all">Clock Out</button>
             </div>
-            <button onClick={() => setStep(1)} className="text-slate-300 font-black uppercase underline text-[10px]">Cancel</button>
+            <button onClick={() => setStep(1)} className="text-slate-300 font-black uppercase underline text-[10px]">Back</button>
           </div>
         )}
       </div>
