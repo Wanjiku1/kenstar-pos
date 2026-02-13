@@ -11,18 +11,20 @@ import {
 } from 'lucide-react'; 
 import { toast } from 'sonner';
 
-const APP_VERSION = "1.0.7";
+const APP_VERSION = "1.0.8";
 
+// UPDATED: Matching your QR Station coordinates exactly
 const SHOP_DATA: Record<string, { lat: number; lng: number; name: string; color: string }> = {
-  '315': { lat: -1.2825, lng: 36.8967, name: 'Shop 315', color: 'bg-blue-600' },
-  '172': { lat: -1.2825, lng: 36.8967, name: 'Shop 172', color: 'bg-slate-900' },
-  'Stage': { lat: -1.2825, lng: 36.8967, name: 'Stage Outlet', color: 'bg-green-600' }
+  '315': { lat: -1.283519, lng: 36.887452, name: 'Shop 315', color: 'bg-blue-600' },
+  '172': { lat: -1.283215, lng: 36.887374, name: 'Shop 172', color: 'bg-slate-900' },
+  'Stage': { lat: -1.283971, lng: 36.887177, name: 'Stage Outlet', color: 'bg-green-600' }
 };
 
 function TerminalContent() {
   const searchParams = useSearchParams();
   const [activeBranch, setActiveBranch] = useState<string | null>(null);
   const [targetCoords, setTargetCoords] = useState<{lat: number, lng: number} | null>(null);
+  const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
   const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState(1); 
   const [loading, setLoading] = useState(false);
@@ -34,7 +36,6 @@ function TerminalContent() {
   const [isOnline, setIsOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
 
-  // Define this inside the component to fix the "Cannot find name" error
   const handleManualBranchSelect = (id: string) => {
     const shop = SHOP_DATA[id];
     setActiveBranch(id);
@@ -69,7 +70,7 @@ function TerminalContent() {
     return () => clearInterval(timer);
   }, [searchParams]);
 
-  // SYNC STAFF LIST FOR OFFLINE LOGIN
+  // SYNC STAFF LIST
   useEffect(() => {
     const cacheStaffList = async () => {
       if (!isOnline) return;
@@ -83,7 +84,7 @@ function TerminalContent() {
     cacheStaffList();
   }, [isOnline]);
 
-  // BACKGROUND SYNC ATTENDANCE
+  // BACKGROUND SYNC
   useEffect(() => {
     const syncAttendance = async () => {
       if (!isOnline) return;
@@ -108,11 +109,14 @@ function TerminalContent() {
     if (mounted && targetCoords) checkLocation();
   }, [mounted, targetCoords]);
 
+  // UPDATED: Tightened Distance Logic
   const checkLocation = () => {
     if (!targetCoords) return;
     navigator.geolocation.getCurrentPosition((pos) => {
       const lat1 = pos.coords.latitude;
       const lon1 = pos.coords.longitude;
+      setUserCoords({ lat: lat1, lng: lon1 }); // Save user location for the record
+
       const R = 6371e3; 
       const dLat = (targetCoords.lat - lat1) * Math.PI / 180;
       const dLon = (targetCoords.lng - lon1) * Math.PI / 180;
@@ -121,16 +125,17 @@ function TerminalContent() {
                 Math.sin(dLon/2) * Math.sin(dLon/2);
       const distance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
       const roundedDistance = Math.round(distance);
+      
       setDistanceInfo(roundedDistance);
-      setGeoError(roundedDistance > 1500);
+      
+      // ALLOWANCE: 100 meters (Tight but allows for GPS drift)
+      setGeoError(roundedDistance > 100); 
     }, () => setGeoError(true), { enableHighAccuracy: true });
   };
 
   const handleVerify = async () => {
     if (!formData.staffId || !formData.pin) return toast.error("Enter credentials");
     setLoading(true);
-    
-    // Check locally saved list (Everyone can log in shared or private)
     const staffList = JSON.parse(localStorage.getItem('kenstar_staff_list') || '[]');
     const user = staffList.find((s: any) => 
       s["Employee Id"]?.toUpperCase() === formData.staffId.toUpperCase() && 
@@ -168,7 +173,10 @@ function TerminalContent() {
       "Date": dateString,
       "status": status,
       [type === 'In' ? "Time In" : "Time Out"]: timeString,
-      "Is Paid": false
+      "Is Paid": false,
+      // NEW: Log coordinates for manager review
+      "lat": userCoords?.lat,
+      "lng": userCoords?.lng
     };
 
     const queue = JSON.parse(localStorage.getItem('kenstar_offline_sync') || '[]');
@@ -176,7 +184,7 @@ function TerminalContent() {
     localStorage.setItem('kenstar_offline_sync', JSON.stringify(queue));
     setPendingCount(queue.length);
 
-    toast.info("Saved to Local Memory");
+    toast.success(`${type} Successful (Logged Offline)`);
 
     setStep(1);
     setFormData({ staffId: '', pin: '' });
@@ -200,13 +208,20 @@ function TerminalContent() {
     );
   }
 
+  // UPDATED ERROR SCREEN: More professional
   if (geoError) return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
         <div className="bg-white p-10 rounded-[3rem] shadow-2xl max-w-sm border-b-8 border-red-600">
           <MapPinOff size={64} className="text-red-600 mx-auto mb-6" />
-          <h1 className="text-3xl font-black uppercase text-slate-900 tracking-tighter">Out of Range</h1>
-          <p className="text-4xl font-black text-red-600 mt-4">{distanceInfo}m</p>
-          <button onClick={() => window.location.reload()} className="mt-8 w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase text-[10px]">Retry GPS</button>
+          <h1 className="text-3xl font-black uppercase text-slate-900 tracking-tighter leading-none">Access <br/>Denied</h1>
+          <p className="text-sm font-bold text-slate-400 mt-4 uppercase tracking-widest">You must be at the shop to clock in.</p>
+          <div className="bg-slate-50 rounded-2xl p-4 mt-6">
+             <p className="text-xs font-black text-slate-400 uppercase">Current Distance</p>
+             <p className="text-4xl font-black text-red-600">{distanceInfo}m</p>
+          </div>
+          <button onClick={() => window.location.reload()} className="mt-8 w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2">
+            <RefreshCw size={14} /> Refresh GPS
+          </button>
         </div>
     </div>
   );
@@ -232,10 +247,16 @@ function TerminalContent() {
         <div className="p-10">
           {step === 1 ? (
             <div className="space-y-6">
-              <input type="text" className="w-full bg-slate-50 border-2 border-slate-100 rounded-[2rem] py-5 px-8 font-black uppercase" placeholder="Staff ID" value={formData.staffId} onChange={(e) => setFormData({...formData, staffId: e.target.value})} />
-              <input type="password" placeholder="PIN" className="w-full bg-slate-50 border-2 border-slate-100 rounded-[2rem] py-5 px-8 font-black tracking-[0.5em]" value={formData.pin} onChange={(e) => setFormData({...formData, pin: e.target.value})} />
-              <button onClick={handleVerify} disabled={loading} className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase text-xs shadow-xl active:scale-95">
-                {loading ? <Loader2 className="animate-spin mx-auto" /> : 'Enter Terminal'}
+              <div className="relative">
+                <User className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+                <input type="text" className="w-full bg-slate-50 border-2 border-slate-100 rounded-[2rem] py-5 pl-16 pr-8 font-black uppercase placeholder:text-slate-300" placeholder="Staff ID" value={formData.staffId} onChange={(e) => setFormData({...formData, staffId: e.target.value})} />
+              </div>
+              <div className="relative">
+                <Lock className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
+                <input type="password" placeholder="PIN" className="w-full bg-slate-50 border-2 border-slate-100 rounded-[2rem] py-5 pl-16 pr-8 font-black tracking-[0.5em] placeholder:tracking-normal placeholder:text-slate-300" value={formData.pin} onChange={(e) => setFormData({...formData, pin: e.target.value})} />
+              </div>
+              <button onClick={handleVerify} disabled={loading} className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase text-xs shadow-xl active:scale-95 disabled:opacity-50">
+                {loading ? <Loader2 className="animate-spin mx-auto" /> : 'Identify Staff'}
               </button>
               <button 
                 onClick={() => {
@@ -248,19 +269,26 @@ function TerminalContent() {
             </div>
           ) : (
             <div className="text-center space-y-8 py-4">
-              <h2 className="text-4xl font-black text-slate-900 uppercase tracking-tighter">{staffMember["Employee Name"]}</h2>
-              <div className="grid grid-cols-1 gap-4">
-                <button onClick={() => processClock('In')} disabled={loading} className="bg-green-500 text-white py-12 rounded-[2.5rem] font-black uppercase text-2xl shadow-xl active:scale-95">Clock In</button>
-                <button onClick={() => processClock('Out')} disabled={loading} className="bg-red-600 text-white py-12 rounded-[2.5rem] font-black uppercase text-2xl shadow-xl active:scale-95">Clock Out</button>
+              <div className="bg-blue-50 py-4 px-2 rounded-2xl">
+                 <h2 className="text-4xl font-black text-slate-900 uppercase tracking-tighter">{staffMember["Employee Name"]}</h2>
+                 <p className="text-[10px] font-black text-blue-600 uppercase mt-1">Authorized for {SHOP_DATA[activeBranch!]?.name}</p>
               </div>
-              <button onClick={() => setStep(1)} className="text-[10px] font-black text-slate-300 uppercase tracking-widest pt-6 block mx-auto">← Exit Session</button>
+              <div className="grid grid-cols-1 gap-4">
+                <button onClick={() => processClock('In')} disabled={loading} className="bg-green-500 text-white py-12 rounded-[2.5rem] font-black uppercase text-2xl shadow-xl active:scale-95 hover:bg-green-600 transition-colors">Clock In</button>
+                <button onClick={() => processClock('Out')} disabled={loading} className="bg-red-600 text-white py-12 rounded-[2.5rem] font-black uppercase text-2xl shadow-xl active:scale-95 hover:bg-red-700 transition-colors">Clock Out</button>
+              </div>
+              <button onClick={() => setStep(1)} className="text-[10px] font-black text-slate-300 uppercase tracking-widest pt-6 block mx-auto hover:text-slate-900 transition-colors">← End Session</button>
             </div>
           )}
         </div>
       </div>
 
-      <div className="mt-8 opacity-30 text-center">
+      <div className="mt-8 opacity-30 text-center flex flex-col items-center gap-2">
         <p className="text-[10px] font-black text-white uppercase tracking-[0.3em]">Kenstar Uniforms • v{APP_VERSION}</p>
+        <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            <span className="text-[8px] font-bold text-white uppercase tracking-widest">{isOnline ? 'System Online' : 'Offline Mode Active'}</span>
+        </div>
       </div>
     </div>
   );

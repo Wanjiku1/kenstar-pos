@@ -18,22 +18,22 @@ export default function QRStation() {
       id: '315', 
       name: 'Shop 315', 
       color: 'bg-blue-600', 
-      lat: -1.2825, 
-      lng: 36.8967 
+      lat: -1.283519, 
+      lng: 36.887452 
     },
     { 
       id: '172', 
       name: 'Shop 172', 
       color: 'bg-slate-900', 
-      lat: -1.2825, 
-      lng: 36.8967 
+      lat: -1.283215, 
+      lng: 36.887374 
     },
     { 
       id: 'Stage', 
       name: 'Stage Outlet', 
       color: 'bg-green-600', 
-      lat: -1.2825, 
-      lng: 36.8967 
+      lat: -1.283971, 
+      lng: 36.887177 
     }
   ];
 
