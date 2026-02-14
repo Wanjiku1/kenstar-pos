@@ -166,7 +166,7 @@ export default function QRStation() {
               <div className="flex items-center gap-4">
                 <Info size={24} className="text-[#007a43]"/>
                 <p className="text-xs font-bold uppercase text-slate-500 leading-tight">
-                  Staff must be on-site to clock in.<br/>Unauthorized scans are flagged to management.
+                Staff must be on-site to clock in.<br/>Unauthorized scans are flagged to management.
                 </p>
               </div>
               <p className="text-xs font-black text-slate-300 uppercase italic">Kenstar Management System v3.2</p>
