@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { QRCodeSVG } from 'qrcode.react'; 
+// Changed to QRCodeCanvas for better print/PDF support
+import { QRCodeCanvas } from 'qrcode.react'; 
 import { Download, MapPin, ChevronLeft, ShieldCheck, Printer, Info } from 'lucide-react';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
@@ -24,16 +25,22 @@ export default function QRStation() {
 
   const getBaseUrl = () => (typeof window !== 'undefined' ? window.location.origin : '');
 
+  // --- UPDATED DOWNLOAD LOGIC ---
   const downloadPDF = async () => {
     if (!posterRef.current || !selectedShop) return;
     
     try {
-      // Scale 4 provides extremely sharp QR codes for phone scanners
+      // Small delay to ensure the Canvas is fully painted before capturing
+      await new Promise(r => setTimeout(r, 200));
+
       const canvas = await html2canvas(posterRef.current, { 
-        scale: 4, 
+        scale: 3, // Scale 3 is the perfect balance of sharp and reliable
         useCORS: true,
         logging: false,
-        backgroundColor: "#ffffff"
+        backgroundColor: "#ffffff",
+        // Force the capture to match the element size exactly
+        width: posterRef.current.offsetWidth,
+        height: posterRef.current.offsetHeight
       });
       
       const imgData = canvas.toDataURL('image/png');
@@ -45,7 +52,7 @@ export default function QRStation() {
       pdf.save(`KENSTAR-POSTER-${selectedShop.id.toUpperCase()}.pdf`);
     } catch (err) {
       console.error("PDF Generation Error:", err);
-      alert("Could not generate PDF. Try using 'Print Now' and selecting 'Save as PDF' in the printer settings.");
+      alert("Could not generate PDF. Please use 'Print Now' and select 'Save as PDF' in the printer settings.");
     }
   };
 
@@ -124,8 +131,8 @@ export default function QRStation() {
 
             <div className="flex flex-col items-center">
                <div className="p-12 bg-white border-[1px] border-slate-100 rounded-[4rem] shadow-2xl">
-                  {/* The key={selectedShop.id} is the most important part for unique codes */}
-                  <QRCodeSVG 
+                 {/* UPDATED TO QRCodeCanvas - Printers and PDF generators prefer this over SVG */}
+                 <QRCodeCanvas 
                     key={selectedShop.id}
                     value={`${getBaseUrl()}/terminal?branch=${selectedShop.id}&lat=${selectedShop.lat}&lng=${selectedShop.lng}`} 
                     size={400} 
@@ -134,7 +141,7 @@ export default function QRStation() {
                   />
                </div>
                <h3 className="text-8xl font-black uppercase text-slate-900 tracking-tighter italic mt-12">
-                  {selectedShop.name}
+                 {selectedShop.name}
                </h3>
                <div className="mt-4 flex items-center gap-2 text-slate-400 font-bold uppercase tracking-widest text-sm">
                  <MapPin size={16} /> GPS Check Enabled

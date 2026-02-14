@@ -12,14 +12,41 @@
   }
 }
 
-/* YOUR PRINT LOGIC (Keep this at the very bottom) */
-@layer base {
-  @media print {
-    body * { visibility: hidden; }
-    #printable-area, #printable-area * { visibility: visible !important; }
-    #printable-area {
-      position: absolute; left: 0; top: 0; width: 100%; padding: 20px;
-    }
-    @page { margin: 0; size: auto; }
+/* THE UPDATED PRINT LOGIC */
+@media print {
+  /* 1. Hide everything by default */
+  body * { 
+    visibility: hidden; 
+  }
+
+  /* 2. Only show the poster area */
+  /* Note: Ensure your poster div in page.tsx has the ref={posterRef} 
+     and we will use the class 'print-area' we discussed */
+  .print-area, .print-area * { 
+    visibility: visible !important; 
+  }
+
+  .print-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 210mm !important; /* Fixed A4 Width */
+    height: 297mm !important; /* Fixed A4 Height */
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* 3. Force Chrome/Safari to print the Green Colors and Backgrounds */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* 4. Remove the browser's default Header (URL) and Footer (Page Number) */
+  @page {
+    margin: 0;
+    size: auto;
   }
 }
