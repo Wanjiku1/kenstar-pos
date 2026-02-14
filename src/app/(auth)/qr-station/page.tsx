@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-// Changed to QRCodeCanvas for better print/PDF support
 import { QRCodeCanvas } from 'qrcode.react'; 
 import { Download, MapPin, ChevronLeft, ShieldCheck, Printer, Info } from 'lucide-react';
 import Link from 'next/link';
@@ -25,25 +24,32 @@ export default function QRStation() {
 
   const getBaseUrl = () => (typeof window !== 'undefined' ? window.location.origin : '');
 
-  // --- UPDATED DOWNLOAD LOGIC ---
   const downloadPDF = async () => {
     if (!posterRef.current || !selectedShop) return;
     
     try {
-      // Small delay to ensure the Canvas is fully painted before capturing
-      await new Promise(r => setTimeout(r, 200));
+      // Extended delay to ensure the Probook hardware finishes rendering the Canvas
+      await new Promise(r => setTimeout(r, 500));
 
       const canvas = await html2canvas(posterRef.current, { 
-        scale: 3, // Scale 3 is the perfect balance of sharp and reliable
+        scale: 2, // Scale 2 is much safer for memory than Scale 4
         useCORS: true,
         logging: false,
         backgroundColor: "#ffffff",
-        // Force the capture to match the element size exactly
         width: posterRef.current.offsetWidth,
-        height: posterRef.current.offsetHeight
+        height: posterRef.current.offsetHeight,
+        onclone: (clonedDoc) => {
+          // Ensure the cloned element for capture is visible
+          const el = clonedDoc.querySelector('.print-area') as HTMLElement;
+          if (el) el.style.visibility = 'visible';
+        }
       });
       
       const imgData = canvas.toDataURL('image/png');
+      
+      // Fail-safe: if image data is blank, throw error
+      if (imgData === "data:,") throw new Error("Blank Canvas");
+
       const pdf = new jsPDF('p', 'mm', 'a4');
       const width = pdf.internal.pageSize.getWidth();
       const height = (canvas.height * width) / canvas.width;
@@ -52,7 +58,8 @@ export default function QRStation() {
       pdf.save(`KENSTAR-POSTER-${selectedShop.id.toUpperCase()}.pdf`);
     } catch (err) {
       console.error("PDF Generation Error:", err);
-      alert("Could not generate PDF. Please use 'Print Now' and select 'Save as PDF' in the printer settings.");
+      alert("Download failed. Opening Print window instead—select 'Save as PDF'.");
+      window.print();
     }
   };
 
@@ -60,13 +67,11 @@ export default function QRStation() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-8 font-sans selection:bg-green-100">
-      {/* UI HEADER - Hidden during print */}
       <div className="max-w-4xl mx-auto mb-12 print:hidden">
         <Link href="/admin" className="text-slate-400 hover:text-[#007a43] flex items-center gap-2 font-black text-[10px] uppercase mb-8 transition-all group">
           <ChevronLeft size={14} className="group-hover:-translate-x-1 transition-transform" /> 
           Back to Command Center
         </Link>
-        
         <div className="flex items-center gap-4">
             <div className="bg-[#007a43] p-3 rounded-2xl text-white shadow-lg">
                 <ShieldCheck size={24} />
@@ -78,7 +83,6 @@ export default function QRStation() {
         </div>
       </div>
 
-      {/* SHOP SELECTION - Hidden during print */}
       <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 print:hidden">
         {shops.map((shop) => (
           <button
@@ -101,7 +105,6 @@ export default function QRStation() {
 
       {selectedShop && (
         <div className="mt-16 flex flex-col items-center animate-in fade-in slide-in-from-bottom-8">
-          {/* ACTION BUTTONS - Hidden during print */}
           <div className="flex gap-4 print:hidden mb-12">
             <button 
               onClick={() => window.print()}
@@ -117,10 +120,9 @@ export default function QRStation() {
             </button>
           </div>
 
-          {/* PHYSICAL POSTER - Optimized for A4 printing */}
           <div 
             ref={posterRef}
-            className="bg-white w-[210mm] min-h-[297mm] p-16 flex flex-col items-center justify-between border-[20px] border-[#007a43] shadow-2xl rounded-3xl print:rounded-none print:border-[15px] print:shadow-none"
+            className="print-area bg-white w-[210mm] min-h-[297mm] p-16 flex flex-col items-center justify-between border-[20px] border-[#007a43] shadow-2xl rounded-3xl print:rounded-none print:border-[15px] print:shadow-none"
           >
             <div className="text-center">
               <h2 className="text-7xl font-black italic uppercase tracking-tighter text-slate-900">
@@ -131,7 +133,6 @@ export default function QRStation() {
 
             <div className="flex flex-col items-center">
                <div className="p-12 bg-white border-[1px] border-slate-100 rounded-[4rem] shadow-2xl">
-                 {/* UPDATED TO QRCodeCanvas - Printers and PDF generators prefer this over SVG */}
                  <QRCodeCanvas 
                     key={selectedShop.id}
                     value={`${getBaseUrl()}/terminal?branch=${selectedShop.id}&lat=${selectedShop.lat}&lng=${selectedShop.lng}`} 
@@ -148,20 +149,17 @@ export default function QRStation() {
                </div>
             </div>
 
-            {/* INSTRUCTIONS FOR STAFF */}
             <div className="w-full grid grid-cols-3 gap-8 border-t-8 border-slate-50 pt-16">
-              <div className="text-center space-y-4">
-                <div className="bg-[#007a43] w-14 h-14 rounded-full flex items-center justify-center mx-auto text-white text-2xl font-black">1</div>
-                <p className="text-lg font-black uppercase text-slate-800">Scan QR<br/><span className="text-xs text-slate-400 font-bold">Using Phone Camera</span></p>
-              </div>
-              <div className="text-center space-y-4">
-                <div className="bg-[#007a43] w-14 h-14 rounded-full flex items-center justify-center mx-auto text-white text-2xl font-black">2</div>
-                <p className="text-lg font-black uppercase text-slate-800">Enter PIN<br/><span className="text-xs text-slate-400 font-bold">Standard Staff ID</span></p>
-              </div>
-              <div className="text-center space-y-4">
-                <div className="bg-[#007a43] w-14 h-14 rounded-full flex items-center justify-center mx-auto text-white text-2xl font-black">3</div>
-                <p className="text-lg font-black uppercase text-slate-800">Done<br/><span className="text-xs text-slate-400 font-bold">Auto-Logged</span></p>
-              </div>
+              {[
+                { n: 1, t: "Scan QR", s: "Using Phone Camera" },
+                { n: 2, t: "Enter PIN", s: "Standard Staff ID" },
+                { n: 3, t: "Done", s: "Auto-Logged" }
+              ].map(step => (
+                <div key={step.n} className="text-center space-y-4">
+                  <div className="bg-[#007a43] w-14 h-14 rounded-full flex items-center justify-center mx-auto text-white text-2xl font-black">{step.n}</div>
+                  <p className="text-lg font-black uppercase text-slate-800">{step.t}<br/><span className="text-xs text-slate-400 font-bold">{step.s}</span></p>
+                </div>
+              ))}
             </div>
 
             <div className="w-full flex justify-between items-center p-8 bg-slate-50 rounded-3xl">
