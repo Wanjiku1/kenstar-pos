@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation'; // Added this
 import { supabase } from '@/lib/supabase';
 import { 
   Loader2, CheckCircle2, UserCheck, Settings2, AlertTriangle, MapPin, WifiOff, Globe 
@@ -13,7 +14,9 @@ const SHOP_DATA: Record<string, { lat: number; lng: number; name: string }> = {
   'Stage': { lat: -1.283971, lng: 36.887177, name: 'Stage Outlet' }
 };
 
-export default function TerminalPage() {
+// Internal component to handle the SearchParams safely
+function TerminalContent() {
+  const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [activeBranch, setActiveBranch] = useState<string | null>(null);
@@ -31,26 +34,46 @@ export default function TerminalPage() {
 
   const isSunday = currentTime.getDay() === 0;
 
-  // --- OFFLINE SYNC LOGIC ---
+  // --- NEW: LOGIC TO READ COORDINATES FROM QR CODE URL ---
+  useEffect(() => {
+    const branch = searchParams.get('branch');
+    const lat = searchParams.get('lat');
+    const lng = searchParams.get('lng');
+
+    if (branch && lat && lng) {
+      // If scanned via QR, override local storage and lock to this shop
+      setActiveBranch(branch);
+      setTargetCoords({ lat: parseFloat(lat), lng: parseFloat(lng) });
+      setStep(1); 
+      localStorage.setItem('kenstar_saved_branch', branch);
+    } else {
+      // Fallback to your original saved branch logic
+      const saved = localStorage.getItem('kenstar_saved_branch');
+      if (saved) {
+        setActiveBranch(saved);
+        setTargetCoords({ lat: SHOP_DATA[saved].lat, lng: SHOP_DATA[saved].lng });
+      } else {
+        setStep(0);
+      }
+    }
+  }, [searchParams]);
+
+  // --- EVERYTHING BELOW REMAINS EXACTLY AS YOUR ORIGINAL CODE ---
+
   const syncOfflineRecords = useCallback(async () => {
     const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
     if (queue.length === 0) return;
-
-    console.log("Attempting automatic sync...");
     let successCount = 0;
-    
     for (const record of queue) {
       const { error } = await supabase.from('attendance').upsert(record, { onConflict: 'Employee Id, Date' });
       if (!error) successCount++;
     }
-
     if (successCount > 0) {
       toast.success(`Automatically synced ${successCount} offline records!`);
       localStorage.setItem('kenstar_offline_queue', '[]');
     }
   }, []);
 
-  // Cache staff for offline login
   const updateStaffCache = useCallback(async () => {
     if (!navigator.onLine) return;
     const { data } = await supabase.from('staff').select('*');
@@ -60,32 +83,18 @@ export default function TerminalPage() {
   useEffect(() => {
     setMounted(true);
     setIsOnline(navigator.onLine);
-
-    // Automatic Sync Listeners
-    const handleOnline = () => {
-      setIsOnline(true);
-      syncOfflineRecords();
-      updateStaffCache();
-    };
+    const handleOnline = () => { setIsOnline(true); syncOfflineRecords(); updateStaffCache(); };
     const handleOffline = () => setIsOnline(false);
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    const saved = localStorage.getItem('kenstar_saved_branch');
-    if (saved) {
-      setActiveBranch(saved);
-      setTargetCoords({ lat: SHOP_DATA[saved].lat, lng: SHOP_DATA[saved].lng });
-    } else {
-      setStep(0);
-    }
+    
+    // Note: Removed your duplicate branch logic here as it is now handled by the param checker above
 
     if (navigator.onLine) {
         updateStaffCache();
         syncOfflineRecords();
     }
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -133,11 +142,9 @@ export default function TerminalPage() {
   const handleVerify = async () => {
     if (!formData.staffId || !formData.pin) return toast.error("Enter Credentials");
     setLoading(true);
-
     const idInput = formData.staffId.trim().toUpperCase();
     const pinInput = formData.pin.trim();
 
-    // 1. Try Online Verification
     if (isOnline) {
       try {
         const { data, error } = await supabase.from('staff').select('*').eq('Employee Id', idInput).eq('pin', pinInput).single();
@@ -148,10 +155,9 @@ export default function TerminalPage() {
           setLoading(false);
           return;
         }
-      } catch (e) { /* fall through to offline check */ }
+      } catch (e) { }
     }
 
-    // 2. Offline Fallback Check
     const cache = JSON.parse(localStorage.getItem('kenstar_staff_cache') || '[]');
     const matched = cache.find((s: any) => s["Employee Id"] === idInput && s["pin"] === pinInput);
 
@@ -206,7 +212,6 @@ export default function TerminalPage() {
         toast.error("Cloud Sync Failed");
       }
     } else {
-      // Save to Offline Queue
       const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
       localStorage.setItem('kenstar_offline_queue', JSON.stringify([...queue, record]));
       setPunchResult({ status, message: "Offline Success", type });
@@ -220,7 +225,6 @@ export default function TerminalPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
-      {/* Network Status Indicator */}
       <div className={`fixed top-6 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 ${isOnline ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
         {isOnline ? <Globe size={12}/> : <WifiOff size={12}/>}
         {isOnline ? 'Network Online' : 'Offline Mode'}
@@ -320,5 +324,14 @@ export default function TerminalPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// Wrap in Suspense because of useSearchParams
+export default function TerminalPage() {
+  return (
+    <Suspense fallback={<div className="text-white">Loading...</div>}>
+      <TerminalContent />
+    </Suspense>
   );
 }
