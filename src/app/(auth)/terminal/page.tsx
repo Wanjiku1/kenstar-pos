@@ -35,6 +35,29 @@ function TerminalContent() {
 
   const isSunday = currentTime.getDay() === 0;
 
+  // --- NEW: PRESENCE TRACKING FOR ADMIN DASHBOARD ---
+  useEffect(() => {
+    if (staffMember && userCoords && isOnline) {
+      const channel = supabase.channel('active-staff-map', {
+        config: { presence: { key: staffMember["Employee Id"] } }
+      });
+
+      channel
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await channel.track({
+              name: staffMember["Employee Name"],
+              lat: userCoords.lat,
+              lng: userCoords.lng,
+              online_at: new Date().toISOString(),
+            });
+          }
+        });
+
+      return () => { channel.unsubscribe(); };
+    }
+  }, [staffMember, userCoords, isOnline]);
+
   useEffect(() => {
     const branch = searchParams.get('branch');
     const lat = searchParams.get('lat');
@@ -102,6 +125,7 @@ function TerminalContent() {
     setSelectedShift(null);
     setPunchResult(null);
     setExistingRecord(null);
+    setStaffMember(null); // Clear staff member on reset
   }, []);
 
   useEffect(() => {
@@ -138,7 +162,6 @@ function TerminalContent() {
     if (!formData.staffId || !formData.pin) return toast.error("Enter Credentials");
     setLoading(true);
     
-    // --- CRITICAL FIX: Reset status so previous user's state doesn't block the next person ---
     setExistingRecord(null);
 
     const idInput = formData.staffId.trim().toUpperCase();

@@ -69,7 +69,8 @@ export default function AdminDashboard() {
         setStats({
           todaySales: sales.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0,
           lowStockCount: stock.data?.filter(i => i.stock_quantity < 10).length || 0,
-          lateStaff: attendance.data?.filter(r => r.status === 'Late') || [],
+          // FIX: Match the "Late Arrival" note sent from the terminal
+          lateStaff: attendance.data?.filter(r => r.Notes === 'Late Arrival') || [],
           overtimeCount: attendance.data?.filter(r => r.status === 'Overtime').length || 0,
           totalStockValue: val
         });
@@ -82,19 +83,22 @@ export default function AdminDashboard() {
 
     getMasterData();
 
-    // Presence Channel with Strict coordinate range safety
+    // Presence Channel
     const channel = supabase.channel('active-staff-map', { config: { presence: { key: 'admin' } } });
+    
     channel
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
         const staffList: any[] = [];
         
         Object.keys(state).forEach((key) => {
+          // We skip the 'admin' key so the dashboard doesn't pin itself on the map
+          if (key === 'admin') return;
+
           state[key].forEach((pres: any) => {
             const lat = Number(pres.lat);
             const lng = Number(pres.lng);
             
-            // STRICT SAFETY: Prevent "Out of Range" crashes before they hit the map
             const isSafe = 
               !isNaN(lat) && 
               !isNaN(lng) && 
@@ -103,7 +107,13 @@ export default function AdminDashboard() {
               Math.abs(lng) <= 180;
 
             if (isSafe) {
-              staffList.push({ ...pres, lat, lng });
+              staffList.push({ 
+                ...pres, 
+                lat, 
+                lng,
+                // Ensure name is present for the list display
+                name: pres.name || "Unknown Unit" 
+              });
             }
           });
         });
@@ -166,14 +176,12 @@ export default function AdminDashboard() {
             <UserProfile />
           </header>
 
-          {/* KPI GRID */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <StatCard title="Today's Revenue" value={`KES ${stats.todaySales.toLocaleString()}`} icon={<Banknote />} color="bg-green-600" />
             <StatCard title="Total Stock Value" value={`KES ${stats.totalStockValue.toLocaleString()}`} icon={<Package />} color="bg-blue-600" />
             <StatCard title="Overtime Sessions" value={stats.overtimeCount.toString()} icon={<Clock />} color="bg-blue-900" />
           </div>
 
-          {/* INDICATOR MAP & ACTIVE STAFF PANEL */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
             <div className="lg:col-span-2 bg-white rounded-[3rem] shadow-xl overflow-hidden border-4 border-white relative">
               <div className="absolute top-6 left-6 z-[400] bg-white/90 backdrop-blur-md border border-slate-200 text-slate-900 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-sm">
@@ -191,7 +199,7 @@ export default function AdminDashboard() {
                       {staff.name?.charAt(0)}
                     </div>
                     <div>
-                      <p className="font-black text-slate-800 text-[11px] uppercase">{staff.name || "Unknown Unit"}</p>
+                      <p className="font-black text-slate-800 text-[11px] uppercase">{staff.name}</p>
                       <p className="text-[9px] text-green-600 font-bold uppercase tracking-tighter italic mt-1">Status: Active</p>
                     </div>
                   </div>
@@ -205,7 +213,6 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* TODAY'S VIOLATIONS LOG */}
           <div className="bg-white p-8 rounded-[3rem] shadow-lg border border-slate-200 mb-10">
               <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6 flex items-center gap-2">
                 <AlertTriangle size={16} className="text-red-500" /> Violation Log
@@ -230,10 +237,6 @@ export default function AdminDashboard() {
     </RoleGate>
   );
 }
-
-/**
- * REUSABLE COMPONENTS
- */
 
 function StatCard({ title, value, icon, color }: any) {
   return (
