@@ -69,7 +69,6 @@ export default function AdminDashboard() {
         setStats({
           todaySales: sales.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0,
           lowStockCount: stock.data?.filter(i => i.stock_quantity < 10).length || 0,
-          // FIX: Match the "Late Arrival" note sent from the terminal
           lateStaff: attendance.data?.filter(r => r.Notes === 'Late Arrival') || [],
           overtimeCount: attendance.data?.filter(r => r.status === 'Overtime').length || 0,
           totalStockValue: val
@@ -83,8 +82,10 @@ export default function AdminDashboard() {
 
     getMasterData();
 
-    // Presence Channel
-    const channel = supabase.channel('active-staff-map', { config: { presence: { key: 'admin' } } });
+    // --- ENHANCED PRESENCE SYNC LOGIC ---
+    const channel = supabase.channel('active-staff-map', { 
+      config: { presence: { key: 'admin' } } 
+    });
     
     channel
       .on('presence', { event: 'sync' }, () => {
@@ -92,13 +93,14 @@ export default function AdminDashboard() {
         const staffList: any[] = [];
         
         Object.keys(state).forEach((key) => {
-          // We skip the 'admin' key so the dashboard doesn't pin itself on the map
+          // Skip the admin so HQ doesn't pin itself
           if (key === 'admin') return;
 
           state[key].forEach((pres: any) => {
             const lat = Number(pres.lat);
             const lng = Number(pres.lng);
             
+            // Coordinate validation
             const isSafe = 
               !isNaN(lat) && 
               !isNaN(lng) && 
@@ -111,15 +113,24 @@ export default function AdminDashboard() {
                 ...pres, 
                 lat, 
                 lng,
-                // Ensure name is present for the list display
                 name: pres.name || "Unknown Unit" 
               });
             }
           });
         });
+        
+        console.log("HQ Signal Count:", staffList.length);
         setActiveStaff(staffList);
       })
-      .subscribe();
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          // Force a "heartbeat" so Supabase keeps the connection open
+          await channel.track({ 
+            role: 'admin', 
+            online_at: new Date().toISOString() 
+          });
+        }
+      });
 
     return () => { channel.unsubscribe(); };
   }, []);
