@@ -30,6 +30,9 @@ function TerminalContent() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedShift, setSelectedShift] = useState<string | null>(null);
   const [punchResult, setPunchResult] = useState<{status: string, message: string, type: string} | null>(null);
+  
+  // NEW STATE: Track if they already have a record for today
+  const [existingRecord, setExistingRecord] = useState<any>(null);
 
   const isSunday = currentTime.getDay() === 0;
 
@@ -99,6 +102,7 @@ function TerminalContent() {
     setFormData({ staffId: '', pin: '' });
     setSelectedShift(null);
     setPunchResult(null);
+    setExistingRecord(null);
   }, []);
 
   useEffect(() => {
@@ -136,30 +140,39 @@ function TerminalContent() {
     setLoading(true);
     const idInput = formData.staffId.trim().toUpperCase();
     const pinInput = formData.pin.trim();
+    const today = new Date().toISOString().split('T')[0];
+
+    let matchedStaff = null;
 
     if (isOnline) {
       try {
         const { data, error } = await supabase.from('staff').select('*').eq('Employee Id', idInput).eq('pin', pinInput).single();
         if (data && !error) {
-          setStaffMember(data);
-          setStep(2);
-          checkLocation();
-          setLoading(false);
-          return;
+          matchedStaff = data;
+          // Check for existing attendance record
+          const { data: attRecord } = await supabase.from('attendance').select('*').eq('Employee Id', idInput).eq('Date', today).single();
+          if (attRecord) setExistingRecord(attRecord);
         }
       } catch (e) { }
     }
 
-    const cache = JSON.parse(localStorage.getItem('kenstar_staff_cache') || '[]');
-    const matched = cache.find((s: any) => s["Employee Id"] === idInput && s["pin"] === pinInput);
+    if (!matchedStaff) {
+      const cache = JSON.parse(localStorage.getItem('kenstar_staff_cache') || '[]');
+      matchedStaff = cache.find((s: any) => s["Employee Id"] === idInput && s["pin"] === pinInput);
+      
+      // Offline check for existing record in queue
+      const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
+      const offlineRecord = queue.find((r: any) => r["Employee Id"] === idInput && r["Date"] === today);
+      if (offlineRecord) setExistingRecord(offlineRecord);
+    }
 
-    if (matched) {
-      setStaffMember(matched);
+    if (matchedStaff) {
+      setStaffMember(matchedStaff);
       setStep(2);
       checkLocation();
       if (!isOnline) toast.info("Login successful (Offline Mode)");
     } else {
-      toast.error(isOnline ? "Invalid Credentials" : "Credentials not found in offline cache");
+      toast.error("Invalid Credentials");
     }
     setLoading(false);
   };
@@ -168,41 +181,13 @@ function TerminalContent() {
     if (type === 'In' && !selectedShift) return toast.error("Select Shift First");
     if (distanceInfo && distanceInfo > 50) return toast.error(`Too far (${distanceInfo}m).`);
 
+    // FINAL BLOCK: Extra check to prevent double punch even if UI button was somehow clicked
+    if (type === 'In' && existingRecord?.["Time In"]) {
+        return toast.error("You are already clocked in for today.");
+    }
+
     setLoading(true);
     const today = new Date().toISOString().split('T')[0];
-    const employeeId = staffMember["Employee Id"];
-
-    // 1. FINAL GUARD: Check for existing record to prevent double-punching
-    let currentRecord = null;
-    if (isOnline) {
-      const { data } = await supabase
-        .from('attendance')
-        .select('*')
-        .eq('Employee Id', employeeId)
-        .eq('Date', today)
-        .single();
-      currentRecord = data;
-    } else {
-      const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
-      currentRecord = queue.find((r: any) => r["Employee Id"] === employeeId && r["Date"] === today);
-    }
-
-    if (type === 'In' && currentRecord?.["Time In"]) {
-      setLoading(false);
-      return toast.error("Already Clocked In for today.");
-    }
-
-    if (type === 'Out' && currentRecord?.["Time Out"]) {
-      setLoading(false);
-      return toast.error("Already Clocked Out for today.");
-    }
-
-    if (type === 'Out' && !currentRecord?.["Time In"]) {
-      setLoading(false);
-      return toast.error("Cannot Clock Out: No Clock In record found for today.");
-    }
-
-    // 2. LOGIC CALCULATION
     const now = new Date();
     const timeString = now.toLocaleTimeString('en-GB', { hour12: false });
     const [hours, mins] = timeString.split(':').map(Number);
@@ -215,7 +200,8 @@ function TerminalContent() {
       if (selectedShift === "Sunday Shift") limit = 11;
       if (hours > limit || (hours === limit && mins > 0)) status = "Late Arrival";
     } else {
-      const timeIn = currentRecord["Time In"];
+      // Calculate hours worked based on existing Time In
+      const timeIn = existingRecord?.["Time In"] || timeString;
       const start = new Date(`${today}T${timeIn}`);
       const diffMs = now.getTime() - start.getTime();
       hoursWorked = parseFloat((diffMs / (1000 * 60 * 60)).toFixed(2));
@@ -223,17 +209,17 @@ function TerminalContent() {
     }
 
     const record = {
-      ...(currentRecord || {}),
-      "Employee Id": employeeId,
+      ...(existingRecord || {}),
+      "Employee Id": staffMember["Employee Id"],
       "Employee Name": staffMember["Employee Name"],
       "Shop": SHOP_DATA[activeBranch!]?.name,
       "Date": today,
       "status": isOnline ? "Online" : "Offline",
       "lat": userCoords?.lat || 0,
       "lng": userCoords?.lng || 0,
-      "Worked At": type === 'In' ? selectedShift : (currentRecord?.["Worked At"] || "Clock Out"),
+      "Worked At": type === 'In' ? selectedShift : (existingRecord?.["Worked At"] || "Clock Out"),
       [type === 'In' ? "Time In" : "Time Out"]: timeString,
-      "Total Hours": type === 'Out' ? hoursWorked : (currentRecord?.["Total Hours"] || 0),
+      "Total Hours": type === 'Out' ? hoursWorked : 0,
       "Notes": status
     };
 
@@ -247,11 +233,10 @@ function TerminalContent() {
       }
     } else {
       const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
-      const filteredQueue = queue.filter((r: any) => !(r["Employee Id"] === employeeId && r["Date"] === today));
+      const filteredQueue = queue.filter((r: any) => !(r["Employee Id"] === staffMember["Employee Id"] && r["Date"] === today));
       localStorage.setItem('kenstar_offline_queue', JSON.stringify([...filteredQueue, record]));
       setPunchResult({ status, message: "Offline Success", type });
       setStep(3);
-      toast.warning("Saved locally. Will sync when internet returns.");
     }
     setLoading(false);
   };
@@ -319,14 +304,23 @@ function TerminalContent() {
             </div>
 
             <div className="grid gap-4">
+              {/* CLOCK IN BUTTON - Disabled if record already has Time In */}
               <button 
                 onClick={() => processClock('In')} 
-                disabled={geoError || loading || !distanceInfo}
-                className={`py-10 rounded-[2.5rem] font-black text-3xl uppercase transition-all ${geoError ? 'bg-slate-100 text-slate-300' : 'bg-[#007a43] text-white shadow-xl active:scale-95'}`}
+                disabled={geoError || loading || !distanceInfo || !!existingRecord?.["Time In"]}
+                className={`py-10 rounded-[2.5rem] font-black text-3xl uppercase transition-all ${ (geoError || !!existingRecord?.["Time In"]) ? 'bg-slate-100 text-slate-300' : 'bg-[#007a43] text-white shadow-xl active:scale-95'}`}
               >
-                {geoError ? "Out of Range" : "Clock In"}
+                {existingRecord?.["Time In"] ? "Clocked In" : (geoError ? "Out of Range" : "Clock In")}
               </button>
-              <button onClick={() => processClock('Out')} className="bg-slate-900 text-white py-6 rounded-[2rem] font-black text-xl uppercase">Clock Out</button>
+              
+              {/* CLOCK OUT BUTTON - Disabled if already clocked out or if not clocked in yet */}
+              <button 
+                onClick={() => processClock('Out')} 
+                disabled={loading || !!existingRecord?.["Time Out"] || !existingRecord?.["Time In"]}
+                className={`bg-slate-900 text-white py-6 rounded-[2rem] font-black text-xl uppercase ${ (!!existingRecord?.["Time Out"] || !existingRecord?.["Time In"]) ? 'opacity-20' : ''}`}
+              >
+                {existingRecord?.["Time Out"] ? "Shift Completed" : "Clock Out"}
+              </button>
             </div>
             <button onClick={() => setStep(1)} className="text-slate-300 font-black uppercase underline text-[10px]">Cancel</button>
           </div>
