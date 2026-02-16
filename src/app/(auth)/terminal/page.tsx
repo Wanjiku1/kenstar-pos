@@ -31,7 +31,6 @@ function TerminalContent() {
   const [selectedShift, setSelectedShift] = useState<string | null>(null);
   const [punchResult, setPunchResult] = useState<{status: string, message: string, type: string} | null>(null);
   
-  // NEW STATE: Track if they already have a record for today
   const [existingRecord, setExistingRecord] = useState<any>(null);
 
   const isSunday = currentTime.getDay() === 0;
@@ -138,6 +137,10 @@ function TerminalContent() {
   const handleVerify = async () => {
     if (!formData.staffId || !formData.pin) return toast.error("Enter Credentials");
     setLoading(true);
+    
+    // --- CRITICAL FIX: Reset status so previous user's state doesn't block the next person ---
+    setExistingRecord(null);
+
     const idInput = formData.staffId.trim().toUpperCase();
     const pinInput = formData.pin.trim();
     const today = new Date().toISOString().split('T')[0];
@@ -149,7 +152,6 @@ function TerminalContent() {
         const { data, error } = await supabase.from('staff').select('*').eq('Employee Id', idInput).eq('pin', pinInput).single();
         if (data && !error) {
           matchedStaff = data;
-          // Check for existing attendance record
           const { data: attRecord } = await supabase.from('attendance').select('*').eq('Employee Id', idInput).eq('Date', today).single();
           if (attRecord) setExistingRecord(attRecord);
         }
@@ -160,7 +162,6 @@ function TerminalContent() {
       const cache = JSON.parse(localStorage.getItem('kenstar_staff_cache') || '[]');
       matchedStaff = cache.find((s: any) => s["Employee Id"] === idInput && s["pin"] === pinInput);
       
-      // Offline check for existing record in queue
       const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
       const offlineRecord = queue.find((r: any) => r["Employee Id"] === idInput && r["Date"] === today);
       if (offlineRecord) setExistingRecord(offlineRecord);
@@ -181,7 +182,6 @@ function TerminalContent() {
     if (type === 'In' && !selectedShift) return toast.error("Select Shift First");
     if (distanceInfo && distanceInfo > 50) return toast.error(`Too far (${distanceInfo}m).`);
 
-    // FINAL BLOCK: Extra check to prevent double punch even if UI button was somehow clicked
     if (type === 'In' && existingRecord?.["Time In"]) {
         return toast.error("You are already clocked in for today.");
     }
@@ -200,7 +200,6 @@ function TerminalContent() {
       if (selectedShift === "Sunday Shift") limit = 11;
       if (hours > limit || (hours === limit && mins > 0)) status = "Late Arrival";
     } else {
-      // Calculate hours worked based on existing Time In
       const timeIn = existingRecord?.["Time In"] || timeString;
       const start = new Date(`${today}T${timeIn}`);
       const diffMs = now.getTime() - start.getTime();
@@ -304,7 +303,6 @@ function TerminalContent() {
             </div>
 
             <div className="grid gap-4">
-              {/* CLOCK IN BUTTON - Disabled if record already has Time In */}
               <button 
                 onClick={() => processClock('In')} 
                 disabled={geoError || loading || !distanceInfo || !!existingRecord?.["Time In"]}
@@ -313,7 +311,6 @@ function TerminalContent() {
                 {existingRecord?.["Time In"] ? "Clocked In" : (geoError ? "Out of Range" : "Clock In")}
               </button>
               
-              {/* CLOCK OUT BUTTON - Disabled if already clocked out or if not clocked in yet */}
               <button 
                 onClick={() => processClock('Out')} 
                 disabled={loading || !!existingRecord?.["Time Out"] || !existingRecord?.["Time In"]}
