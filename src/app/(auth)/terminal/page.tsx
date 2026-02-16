@@ -14,6 +14,7 @@ const SHOP_DATA: Record<string, { lat: number; lng: number; name: string }> = {
   'Stage': { lat: -1.283971, lng: 36.887177, name: 'Stage Outlet' }
 };
 
+// --- TERMINAL CONTENT COMPONENT ---
 function TerminalContent() {
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -30,35 +31,15 @@ function TerminalContent() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedShift, setSelectedShift] = useState<string | null>(null);
   const [punchResult, setPunchResult] = useState<{status: string, message: string, type: string} | null>(null);
-  
   const [existingRecord, setExistingRecord] = useState<any>(null);
 
   const isSunday = currentTime.getDay() === 0;
 
-  // --- NEW: PRESENCE TRACKING FOR ADMIN DASHBOARD ---
+  // 1. Setup Phase
   useEffect(() => {
-    if (staffMember && userCoords && isOnline) {
-      const channel = supabase.channel('active-staff-map', {
-        config: { presence: { key: staffMember["Employee Id"] } }
-      });
-
-      channel
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await channel.track({
-              name: staffMember["Employee Name"],
-              lat: userCoords.lat,
-              lng: userCoords.lng,
-              online_at: new Date().toISOString(),
-            });
-          }
-        });
-
-      return () => { channel.unsubscribe(); };
-    }
-  }, [staffMember, userCoords, isOnline]);
-
-  useEffect(() => {
+    setMounted(true);
+    setIsOnline(navigator.onLine);
+    
     const branch = searchParams.get('branch');
     const lat = searchParams.get('lat');
     const lng = searchParams.get('lng');
@@ -66,11 +47,10 @@ function TerminalContent() {
     if (branch && lat && lng) {
       setActiveBranch(branch);
       setTargetCoords({ lat: parseFloat(lat), lng: parseFloat(lng) });
-      setStep(1); 
       localStorage.setItem('kenstar_saved_branch', branch);
     } else {
       const saved = localStorage.getItem('kenstar_saved_branch');
-      if (saved) {
+      if (saved && SHOP_DATA[saved]) {
         setActiveBranch(saved);
         setTargetCoords({ lat: SHOP_DATA[saved].lat, lng: SHOP_DATA[saved].lng });
       } else {
@@ -78,6 +58,35 @@ function TerminalContent() {
       }
     }
   }, [searchParams]);
+
+  // 2. Presence Tracking
+  useEffect(() => {
+    if (staffMember && userCoords && isOnline) {
+      const channel = supabase.channel('active-staff-map', {
+        config: { presence: { key: staffMember["Employee Id"] } }
+      });
+
+      channel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({
+            name: staffMember["Employee Name"],
+            lat: userCoords.lat,
+            lng: userCoords.lng,
+            online_at: new Date().toISOString(),
+          });
+        }
+      });
+
+      return () => { channel.unsubscribe(); };
+    }
+  }, [staffMember, userCoords, isOnline]);
+
+  // 3. Network & Cache Sync
+  const updateStaffCache = useCallback(async () => {
+    if (!navigator.onLine) return;
+    const { data } = await supabase.from('staff').select('*');
+    if (data) localStorage.setItem('kenstar_staff_cache', JSON.stringify(data));
+  }, []);
 
   const syncOfflineRecords = useCallback(async () => {
     const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
@@ -88,20 +97,13 @@ function TerminalContent() {
       if (!error) successCount++;
     }
     if (successCount > 0) {
-      toast.success(`Automatically synced ${successCount} offline records!`);
+      toast.success(`Synced ${successCount} offline records!`);
       localStorage.setItem('kenstar_offline_queue', '[]');
     }
   }, []);
 
-  const updateStaffCache = useCallback(async () => {
-    if (!navigator.onLine) return;
-    const { data } = await supabase.from('staff').select('*');
-    if (data) localStorage.setItem('kenstar_staff_cache', JSON.stringify(data));
-  }, []);
-
   useEffect(() => {
-    setMounted(true);
-    setIsOnline(navigator.onLine);
+    if (!mounted) return;
     const handleOnline = () => { setIsOnline(true); syncOfflineRecords(); updateStaffCache(); };
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
@@ -117,7 +119,7 @@ function TerminalContent() {
       window.removeEventListener('offline', handleOffline);
       clearInterval(timer);
     };
-  }, [syncOfflineRecords, updateStaffCache]);
+  }, [mounted, syncOfflineRecords, updateStaffCache]);
 
   const resetTerminal = useCallback(() => {
     setStep(1);
@@ -125,7 +127,7 @@ function TerminalContent() {
     setSelectedShift(null);
     setPunchResult(null);
     setExistingRecord(null);
-    setStaffMember(null); // Clear staff member on reset
+    setStaffMember(null);
   }, []);
 
   useEffect(() => {
@@ -161,7 +163,6 @@ function TerminalContent() {
   const handleVerify = async () => {
     if (!formData.staffId || !formData.pin) return toast.error("Enter Credentials");
     setLoading(true);
-    
     setExistingRecord(null);
 
     const idInput = formData.staffId.trim().toUpperCase();
@@ -178,13 +179,12 @@ function TerminalContent() {
           const { data: attRecord } = await supabase.from('attendance').select('*').eq('Employee Id', idInput).eq('Date', today).single();
           if (attRecord) setExistingRecord(attRecord);
         }
-      } catch (e) { }
+      } catch (e) {}
     }
 
     if (!matchedStaff) {
       const cache = JSON.parse(localStorage.getItem('kenstar_staff_cache') || '[]');
       matchedStaff = cache.find((s: any) => s["Employee Id"] === idInput && s["pin"] === pinInput);
-      
       const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
       const offlineRecord = queue.find((r: any) => r["Employee Id"] === idInput && r["Date"] === today);
       if (offlineRecord) setExistingRecord(offlineRecord);
@@ -204,10 +204,7 @@ function TerminalContent() {
   const processClock = async (type: 'In' | 'Out') => {
     if (type === 'In' && !selectedShift) return toast.error("Select Shift First");
     if (distanceInfo && distanceInfo > 50) return toast.error(`Too far (${distanceInfo}m).`);
-
-    if (type === 'In' && existingRecord?.["Time In"]) {
-        return toast.error("You are already clocked in for today.");
-    }
+    if (type === 'In' && existingRecord?.["Time In"]) return toast.error("Already clocked in.");
 
     setLoading(true);
     const today = new Date().toISOString().split('T')[0];
@@ -273,7 +270,6 @@ function TerminalContent() {
       </div>
 
       <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-2xl p-10 min-h-[550px] flex flex-col justify-center relative overflow-hidden">
-        
         {step === 0 && (
           <div className="space-y-6">
             <h1 className="text-2xl font-black text-center uppercase italic text-slate-900">Kenstar <span className="text-[#007a43]">Setup</span></h1>
@@ -302,7 +298,7 @@ function TerminalContent() {
           </div>
         )}
 
-        {step === 2 && (
+        {step === 2 && staffMember && (
           <div className="text-center space-y-6">
             <div className="bg-green-50 py-4 rounded-2xl border-2 border-green-100">
               <h2 className="text-xl font-black text-slate-900 uppercase">{staffMember["Employee Name"]}</h2>
@@ -313,7 +309,6 @@ function TerminalContent() {
                 </span>
               </div>
             </div>
-            
             <div className="grid grid-cols-2 gap-3">
               {!isSunday ? (
                 <>
@@ -324,7 +319,6 @@ function TerminalContent() {
                 <button onClick={() => setSelectedShift("Sunday Shift")} className={`col-span-2 py-4 rounded-2xl font-black uppercase text-xs border-2 ${selectedShift === 'Sunday Shift' ? 'bg-[#007a43] text-white border-[#007a43]' : 'bg-white text-slate-400 border-slate-100'}`}>Sunday (11:00 AM)</button>
               )}
             </div>
-
             <div className="grid gap-4">
               <button 
                 onClick={() => processClock('In')} 
@@ -333,7 +327,6 @@ function TerminalContent() {
               >
                 {existingRecord?.["Time In"] ? "Clocked In" : (geoError ? "Out of Range" : "Clock In")}
               </button>
-              
               <button 
                 onClick={() => processClock('Out')} 
                 disabled={loading || !!existingRecord?.["Time Out"] || !existingRecord?.["Time In"]}
@@ -355,7 +348,6 @@ function TerminalContent() {
             ) : (
                <AlertTriangle size={80} className="text-orange-500 mx-auto animate-pulse" />
             )}
-            
             <div className="space-y-2">
               {punchResult?.type === 'In' && (
                 <h2 className={`text-3xl font-black uppercase italic ${punchResult?.status === 'On Time' ? 'text-green-600' : 'text-orange-600'}`}>
@@ -376,9 +368,14 @@ function TerminalContent() {
   );
 }
 
+// --- MAIN EXPORT WRAPPED IN SUSPENSE ---
 export default function TerminalPage() {
   return (
-    <Suspense fallback={<div className="text-white">Loading...</div>}>
+    <Suspense fallback={
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <Loader2 className="animate-spin text-white w-12 h-12" />
+      </div>
+    }>
       <TerminalContent />
     </Suspense>
   );
