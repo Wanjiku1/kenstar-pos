@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation'; // Added this
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { 
   Loader2, CheckCircle2, UserCheck, Settings2, AlertTriangle, MapPin, WifiOff, Globe 
@@ -14,7 +14,6 @@ const SHOP_DATA: Record<string, { lat: number; lng: number; name: string }> = {
   'Stage': { lat: -1.283971, lng: 36.887177, name: 'Stage Outlet' }
 };
 
-// Internal component to handle the SearchParams safely
 function TerminalContent() {
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -34,20 +33,17 @@ function TerminalContent() {
 
   const isSunday = currentTime.getDay() === 0;
 
-  // --- NEW: LOGIC TO READ COORDINATES FROM QR CODE URL ---
   useEffect(() => {
     const branch = searchParams.get('branch');
     const lat = searchParams.get('lat');
     const lng = searchParams.get('lng');
 
     if (branch && lat && lng) {
-      // If scanned via QR, override local storage and lock to this shop
       setActiveBranch(branch);
       setTargetCoords({ lat: parseFloat(lat), lng: parseFloat(lng) });
       setStep(1); 
       localStorage.setItem('kenstar_saved_branch', branch);
     } else {
-      // Fallback to your original saved branch logic
       const saved = localStorage.getItem('kenstar_saved_branch');
       if (saved) {
         setActiveBranch(saved);
@@ -57,8 +53,6 @@ function TerminalContent() {
       }
     }
   }, [searchParams]);
-
-  // --- EVERYTHING BELOW REMAINS EXACTLY AS YOUR ORIGINAL CODE ---
 
   const syncOfflineRecords = useCallback(async () => {
     const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
@@ -89,8 +83,6 @@ function TerminalContent() {
     window.addEventListener('offline', handleOffline);
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     
-    // Note: Removed your duplicate branch logic here as it is now handled by the param checker above
-
     if (navigator.onLine) {
         updateStaffCache();
         syncOfflineRecords();
@@ -177,29 +169,71 @@ function TerminalContent() {
     if (distanceInfo && distanceInfo > 50) return toast.error(`Too far (${distanceInfo}m).`);
 
     setLoading(true);
+    const today = new Date().toISOString().split('T')[0];
+    const employeeId = staffMember["Employee Id"];
+
+    // 1. FINAL GUARD: Check for existing record to prevent double-punching
+    let currentRecord = null;
+    if (isOnline) {
+      const { data } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('Employee Id', employeeId)
+        .eq('Date', today)
+        .single();
+      currentRecord = data;
+    } else {
+      const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
+      currentRecord = queue.find((r: any) => r["Employee Id"] === employeeId && r["Date"] === today);
+    }
+
+    if (type === 'In' && currentRecord?.["Time In"]) {
+      setLoading(false);
+      return toast.error("Already Clocked In for today.");
+    }
+
+    if (type === 'Out' && currentRecord?.["Time Out"]) {
+      setLoading(false);
+      return toast.error("Already Clocked Out for today.");
+    }
+
+    if (type === 'Out' && !currentRecord?.["Time In"]) {
+      setLoading(false);
+      return toast.error("Cannot Clock Out: No Clock In record found for today.");
+    }
+
+    // 2. LOGIC CALCULATION
     const now = new Date();
     const timeString = now.toLocaleTimeString('en-GB', { hour12: false });
     const [hours, mins] = timeString.split(':').map(Number);
     
     let status = "On Time";
+    let hoursWorked = 0;
+
     if (type === 'In') {
       let limit = selectedShift === "7AM Shift" ? 7 : 8;
       if (selectedShift === "Sunday Shift") limit = 11;
       if (hours > limit || (hours === limit && mins > 0)) status = "Late Arrival";
     } else {
+      const timeIn = currentRecord["Time In"];
+      const start = new Date(`${today}T${timeIn}`);
+      const diffMs = now.getTime() - start.getTime();
+      hoursWorked = parseFloat((diffMs / (1000 * 60 * 60)).toFixed(2));
       status = "Shift Ended";
     }
 
     const record = {
-      "Employee Id": staffMember["Employee Id"],
+      ...(currentRecord || {}),
+      "Employee Id": employeeId,
       "Employee Name": staffMember["Employee Name"],
       "Shop": SHOP_DATA[activeBranch!]?.name,
-      "Date": now.toISOString().split('T')[0],
+      "Date": today,
       "status": isOnline ? "Online" : "Offline",
       "lat": userCoords?.lat || 0,
       "lng": userCoords?.lng || 0,
-      "Worked At": type === 'In' ? selectedShift : "Clock Out",
+      "Worked At": type === 'In' ? selectedShift : (currentRecord?.["Worked At"] || "Clock Out"),
       [type === 'In' ? "Time In" : "Time Out"]: timeString,
+      "Total Hours": type === 'Out' ? hoursWorked : (currentRecord?.["Total Hours"] || 0),
       "Notes": status
     };
 
@@ -213,7 +247,8 @@ function TerminalContent() {
       }
     } else {
       const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
-      localStorage.setItem('kenstar_offline_queue', JSON.stringify([...queue, record]));
+      const filteredQueue = queue.filter((r: any) => !(r["Employee Id"] === employeeId && r["Date"] === today));
+      localStorage.setItem('kenstar_offline_queue', JSON.stringify([...filteredQueue, record]));
       setPunchResult({ status, message: "Offline Success", type });
       setStep(3);
       toast.warning("Saved locally. Will sync when internet returns.");
@@ -327,7 +362,6 @@ function TerminalContent() {
   );
 }
 
-// Wrap in Suspense because of useSearchParams
 export default function TerminalPage() {
   return (
     <Suspense fallback={<div className="text-white">Loading...</div>}>
