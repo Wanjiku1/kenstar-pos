@@ -58,7 +58,6 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
     }
   };
 
-  // CLEANUP TOOL: REVERT PAYMENT
   const handleRevertPayment = async (past: any) => {
     const confirmRevert = window.confirm(
       `REVERT PAYMENT: This will delete this history record and move ${past["Employee Name"]} back to the pending due list. Continue?`
@@ -69,7 +68,6 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
       const { error: delError } = await supabase.from('payout_history').delete().eq('id', past.id);
       if (delError) throw delError;
 
-      // Note: This logic assumes you want to revert all "Paid" status for this specific employee
       const { error: attError } = await supabase
         .from('attendance')
         .update({ "Is Paid": false })
@@ -85,7 +83,6 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
     }
   };
 
-  // EXPORT TO CSV
   const exportToCSV = () => {
     const headers = ["Employee Name,Shop,Amount Paid,Date,Cycle\n"];
     const rows = historyData.map(h => 
@@ -110,9 +107,23 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
     return item["Payment Cycle"] === view;
   });
 
+  // --- NEW GROUPING LOGIC TO MERGE DUPLICATE STAFF ENTRIES ---
+  const groupedData = filteredData.reduce((acc: any[], current: any) => {
+    const name = current["Employee Name"];
+    const existing = acc.find(item => item["Employee Name"] === name);
+
+    if (existing) {
+      existing.total_due += (current.total_due || 0);
+      existing.total_hours += (current.total_hours || 0);
+    } else {
+      acc.push({ ...current });
+    }
+    return acc;
+  }, []);
+  // -----------------------------------------------------------
+
   return (
     <div className="relative z-50 space-y-6 p-4">
-      {/* HEADER SECTION */}
       <div className="bg-slate-900 rounded-[2rem] p-8 text-white flex flex-col md:flex-row justify-between items-center shadow-lg border-b-4 border-green-500 gap-4">
         <div>
           <h2 className="text-2xl font-black italic uppercase tracking-tighter">Kenstar Payouts</h2>
@@ -125,7 +136,7 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
           {['Weekly', 'Sunday', 'Monthly', 'History'].map((type: any) => (
             <button 
               key={type}
-              onClick={() => setView(type)} 
+              onClick={() => setView(type as any)} 
               className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition-all whitespace-nowrap ${view === type ? 'bg-white text-slate-900' : 'text-slate-400'}`}
             >
               {type}
@@ -154,7 +165,7 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
 
           <div className="divide-y divide-slate-50 max-h-[500px] overflow-y-auto">
             {loading ? <p className="p-10 text-center text-xs font-bold text-slate-400">Loading archives...</p> : 
-             filteredHistory.map((past, i) => (
+               filteredHistory.map((past, i) => (
               <div key={i} className="p-6 flex justify-between items-center hover:bg-slate-50 group">
                 <div>
                   <div className="font-black text-slate-800 uppercase text-sm">{past["Employee Name"]}</div>
@@ -184,7 +195,7 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
           <div className="bg-blue-600 p-6 rounded-[2rem] text-white shadow-xl max-w-sm">
             <p className="text-[10px] font-black uppercase opacity-80">{view} Total Due</p>
             <h3 className="text-3xl font-black italic">
-              KSh {filteredData.reduce((acc, curr) => acc + (curr.total_due || 0), 0).toLocaleString()}
+              KSh {groupedData.reduce((acc, curr) => acc + (curr.total_due || 0), 0).toLocaleString()}
             </h3>
           </div>
 
@@ -199,9 +210,9 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filteredData.length === 0 ? (
+                {groupedData.length === 0 ? (
                   <tr><td colSpan={4} className="p-10 text-center text-xs font-bold text-slate-400">No pending payouts.</td></tr>
-                ) : filteredData.map((item, i) => (
+                ) : groupedData.map((item, i) => (
                   <tr key={i} className="hover:bg-slate-50/50">
                     <td className="p-6">
                       <div className="font-black text-slate-800 uppercase text-sm">{item["Employee Name"]}</div>
