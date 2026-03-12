@@ -9,11 +9,12 @@ import { RoleGate } from "@/components/auth/role-gate";
 import { 
   ShoppingCart, Package, Banknote, AlertTriangle, 
   LayoutDashboard, LogOut, Loader2, ShieldCheck, Clock, 
-  Users, ChevronLeft, QrCode, MapPin, Database
+  Users, ChevronLeft, QrCode, MapPin, Database, LifeBuoy
 } from "lucide-react";
 import Link from 'next/link';
+import { toast } from 'sonner';
 
-// Map component handled with No SSR to prevent hydration errors
+// Map component handled with No SSR
 const MapWithNoSSR = dynamic<any>(() => import('../../../components/MapComponent').then((mod) => mod.default), { 
   ssr: false,
   loading: () => (
@@ -30,6 +31,7 @@ interface DashboardStats {
   lateStaff: any[];
   overtimeCount: number;
   totalStockValue: number;
+  pendingIssuesCount: number; // Added for Support tracking
 }
 
 export default function AdminDashboard() {
@@ -39,7 +41,8 @@ export default function AdminDashboard() {
     lowStockCount: 0, 
     lateStaff: [], 
     overtimeCount: 0,
-    totalStockValue: 0 
+    totalStockValue: 0,
+    pendingIssuesCount: 0
   });
   const [activeStaff, setActiveStaff] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,37 +53,52 @@ export default function AdminDashboard() {
     router.refresh();
   };
 
+  // --- CORE DATA SYNC ---
+  const getMasterData = async () => {
+    try {
+      const now = new Date();
+      const todayStr = now.toISOString().split('T')[0];
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      
+      const [sales, stock, attendance, issues] = await Promise.all([
+        supabase.from('sales').select('total_amount').gte('created_at', todayStart),
+        supabase.from('product_variants').select('stock_quantity, cost_price'),
+        supabase.from('attendance').select('*').eq('Date', todayStr),
+        supabase.from('terminal_issues').select('id').eq('resolved', false) // Check for active help tickets
+      ]);
+      
+      let val = 0;
+      stock.data?.forEach(i => val += (i.stock_quantity * (i.cost_price || 0)));
+
+      setStats({
+        todaySales: sales.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0,
+        lowStockCount: stock.data?.filter(i => i.stock_quantity < 10).length || 0,
+        lateStaff: attendance.data?.filter(r => r.Notes === 'Late Arrival') || [],
+        overtimeCount: attendance.data?.filter(r => r.status === 'Overtime').length || 0,
+        totalStockValue: val,
+        pendingIssuesCount: issues.data?.length || 0
+      });
+    } catch (error) {
+      console.error("HQ Sync Error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const getMasterData = async () => {
-      try {
-        const now = new Date();
-        const todayStr = now.toISOString().split('T')[0];
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-        
-        const [sales, stock, attendance] = await Promise.all([
-          supabase.from('sales').select('total_amount').gte('created_at', todayStart),
-          supabase.from('product_variants').select('stock_quantity, cost_price'),
-          supabase.from('attendance').select('*').eq('Date', todayStr)
-        ]);
-        
-        let val = 0;
-        stock.data?.forEach(i => val += (i.stock_quantity * (i.cost_price || 0)));
-
-        setStats({
-          todaySales: sales.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0,
-          lowStockCount: stock.data?.filter(i => i.stock_quantity < 10).length || 0,
-          lateStaff: attendance.data?.filter(r => r.Notes === 'Late Arrival') || [],
-          overtimeCount: attendance.data?.filter(r => r.status === 'Overtime').length || 0,
-          totalStockValue: val
-        });
-      } catch (error) {
-        console.error("HQ Sync Error:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     getMasterData();
+
+    // --- REAL-TIME SUPPORT TICKETS LISTENER ---
+    const issueSubscription = supabase
+      .channel('hq-issue-alerts')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'terminal_issues' }, (payload) => {
+        toast.error(`NEW SUPPORT TICKET: ${payload.new.issue_type} from ${payload.new.shop}`, {
+          description: payload.new.staff_name,
+          duration: 10000,
+        });
+        getMasterData(); // Refresh counts
+      })
+      .subscribe();
 
     // --- ENHANCED PRESENCE SYNC LOGIC ---
     const channel = supabase.channel('active-staff-map', { 
@@ -93,20 +111,11 @@ export default function AdminDashboard() {
         const staffList: any[] = [];
         
         Object.keys(state).forEach((key) => {
-          // Skip the admin so HQ doesn't pin itself
           if (key === 'admin') return;
-
           state[key].forEach((pres: any) => {
             const lat = Number(pres.lat);
             const lng = Number(pres.lng);
-            
-            // Coordinate validation
-            const isSafe = 
-              !isNaN(lat) && 
-              !isNaN(lng) && 
-              lat !== 0 && 
-              Math.abs(lat) <= 90 && 
-              Math.abs(lng) <= 180;
+            const isSafe = !isNaN(lat) && !isNaN(lng) && lat !== 0 && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
 
             if (isSafe) {
               staffList.push({ 
@@ -118,21 +127,18 @@ export default function AdminDashboard() {
             }
           });
         });
-        
-        console.log("HQ Signal Count:", staffList.length);
         setActiveStaff(staffList);
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          // Force a "heartbeat" so Supabase keeps the connection open
-          await channel.track({ 
-            role: 'admin', 
-            online_at: new Date().toISOString() 
-          });
+          await channel.track({ role: 'admin', online_at: new Date().toISOString() });
         }
       });
 
-    return () => { channel.unsubscribe(); };
+    return () => { 
+      channel.unsubscribe();
+      supabase.removeChannel(issueSubscription);
+    };
   }, []);
 
   if (loading) return (
@@ -154,19 +160,33 @@ export default function AdminDashboard() {
           </div>
 
           <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
-             <Link href="/admin"><NavItem icon={<LayoutDashboard size={18}/>} label="HQ Overview" active /></Link>
-             <Link href="/admin/attendance"><NavItem icon={<Database size={18} className="text-blue-400" />} label="Records Terminal" /></Link>
-             <div className="h-px bg-white/5 my-4 mx-4" />
-             <Link href="/pos"><NavItem icon={<ShoppingCart size={18}/>} label="POS Terminal" /></Link>
-             <Link href="/qr-station"><NavItem icon={<QrCode size={18}/>} label="QR Station" /></Link>
-             <Link href="/inventory"><NavItem icon={<Package size={18}/>} label="Inventory Master" /></Link>
-             <Link href="/admin/users"><NavItem icon={<ShieldCheck size={18} className="text-amber-400" />} label="Security" /></Link>
+              <Link href="/admin"><NavItem icon={<LayoutDashboard size={18}/>} label="HQ Overview" active /></Link>
+              
+              {/* SUPPORT LINK WITH RED BADGE IF ISSUES EXIST */}
+              <Link href="/admin/terminal-issues" className="relative group">
+                <NavItem 
+                  icon={<LifeBuoy size={18} className={stats.pendingIssuesCount > 0 ? "text-red-500 animate-pulse" : "text-slate-400"} />} 
+                  label="Terminal Support" 
+                />
+                {stats.pendingIssuesCount > 0 && (
+                  <span className="absolute right-6 top-1/2 -translate-y-1/2 bg-red-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-lg">
+                    {stats.pendingIssuesCount}
+                  </span>
+                )}
+              </Link>
+
+              <Link href="/admin/attendance"><NavItem icon={<Database size={18} className="text-blue-400" />} label="Records Terminal" /></Link>
+              <div className="h-px bg-white/5 my-4 mx-4" />
+              <Link href="/pos"><NavItem icon={<ShoppingCart size={18}/>} label="POS Terminal" /></Link>
+              <Link href="/qr-station"><NavItem icon={<QrCode size={18}/>} label="QR Station" /></Link>
+              <Link href="/inventory"><NavItem icon={<Package size={18}/>} label="Inventory Master" /></Link>
+              <Link href="/admin/users"><NavItem icon={<ShieldCheck size={18} className="text-amber-400" />} label="Security" /></Link>
           </nav>
 
           <div className="p-6 border-t border-white/5 bg-black/20">
-             <button onClick={handleSignOut} className="flex items-center gap-3 text-red-400 font-black p-4 bg-red-500/10 hover:bg-red-500 hover:text-white rounded-2xl w-full transition-all text-[11px] uppercase tracking-widest">
-               <LogOut size={16} /> Exit System
-             </button>
+              <button onClick={handleSignOut} className="flex items-center gap-3 text-red-400 font-black p-4 bg-red-500/10 hover:bg-red-500 hover:text-white rounded-2xl w-full transition-all text-[11px] uppercase tracking-widest">
+                <LogOut size={16} /> Exit System
+              </button>
           </div>
         </aside>
 
@@ -224,24 +244,47 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="bg-white p-8 rounded-[3rem] shadow-lg border border-slate-200 mb-10">
-              <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6 flex items-center gap-2">
-                <AlertTriangle size={16} className="text-red-500" /> Violation Log
-              </h3>
-              {stats.lateStaff.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {stats.lateStaff.map((s, i) => (
-                    <div key={i} className="bg-red-50 p-4 rounded-2xl border border-red-100 flex justify-between items-center group transition-colors">
-                       <span className="font-black text-red-900 uppercase text-[10px]">{s["Employee Name"]}</span>
-                       <span className="bg-red-600 text-white px-3 py-1 rounded-lg text-[9px] font-black shadow-sm uppercase">{s["Time In"]}</span>
+          {/* LOWER ALERTS GRID */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* VIOLATION LOG */}
+            <div className="bg-white p-8 rounded-[3rem] shadow-lg border border-slate-200">
+                <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6 flex items-center gap-2">
+                  <AlertTriangle size={16} className="text-red-500" /> Violation Log
+                </h3>
+                {stats.lateStaff.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {stats.lateStaff.map((s, i) => (
+                      <div key={i} className="bg-red-50 p-4 rounded-2xl border border-red-100 flex justify-between items-center">
+                         <span className="font-black text-red-900 uppercase text-[10px]">{s["Employee Name"]}</span>
+                         <span className="bg-red-600 text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase">{s["Time In"]}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-10">
+                    <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em] italic text-center">Operational Status: All Staff on Schedule</p>
+                  </div>
+                )}
+            </div>
+
+            {/* QUICK SUPPORT PREVIEW */}
+            <div className="bg-white p-8 rounded-[3rem] shadow-lg border border-slate-200">
+                <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6 flex items-center gap-2">
+                  <LifeBuoy size={16} className="text-blue-600" /> Support Queue
+                </h3>
+                {stats.pendingIssuesCount > 0 ? (
+                  <Link href="/admin/terminal-issues" className="block group">
+                    <div className="bg-blue-50 p-6 rounded-[2rem] border-2 border-blue-100 flex flex-col items-center justify-center gap-2 group-hover:bg-blue-600 transition-all duration-300">
+                       <span className="text-3xl font-black text-blue-600 group-hover:text-white">{stats.pendingIssuesCount}</span>
+                       <span className="text-[10px] font-black text-blue-400 group-hover:text-white uppercase tracking-widest text-center">Active Support Tickets Needs Attention</span>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-10">
-                  <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em] italic">Operational Status: All Staff on Schedule</p>
-                </div>
-              )}
+                  </Link>
+                ) : (
+                  <div className="text-center py-10 opacity-40">
+                    <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em] italic text-center">System Health: Normal</p>
+                  </div>
+                )}
+            </div>
           </div>
         </main>
       </div>
