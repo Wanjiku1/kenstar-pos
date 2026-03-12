@@ -128,6 +128,7 @@ function TerminalContent() {
     setPunchResult(null);
     setExistingRecord(null);
     setStaffMember(null);
+    setDistanceInfo(null);
   }, []);
 
   useEffect(() => {
@@ -139,6 +140,9 @@ function TerminalContent() {
 
   const checkLocation = useCallback(() => {
     if (!targetCoords || !navigator.geolocation) return;
+    // Added 15s timeout to prevent infinite "Locating..."
+    const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
+
     navigator.geolocation.getCurrentPosition((pos) => {
       const lat1 = pos.coords.latitude;
       const lon1 = pos.coords.longitude;
@@ -150,7 +154,10 @@ function TerminalContent() {
       const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
       setDistanceInfo(Math.round(d));
       setGeoError(d > 50); 
-    }, () => setGeoError(true), { enableHighAccuracy: true });
+    }, () => {
+      setGeoError(true);
+      toast.error("GPS Timeout. Please ensure Location is ON.");
+    }, options);
   }, [targetCoords]);
 
   const selectBranch = (id: string) => {
@@ -158,6 +165,17 @@ function TerminalContent() {
     setActiveBranch(id);
     setTargetCoords({ lat: SHOP_DATA[id].lat, lng: SHOP_DATA[id].lng });
     setStep(1);
+  };
+
+  const reportLag = async () => {
+    const id = formData.staffId || 'Unknown';
+    toast.info("Reporting terminal lag...");
+    // This assumes you created the 'terminal_issues' table
+    await supabase.from('terminal_issues').insert([{ 
+      employee_id: id === 'Unknown' ? null : id, 
+      issue_type: 'Terminal Lag' 
+    }]);
+    toast.success("Reported. Please wait a moment.");
   };
 
   const handleVerify = async () => {
@@ -238,7 +256,7 @@ function TerminalContent() {
       "lng": userCoords?.lng || 0,
       "Worked At": type === 'In' ? selectedShift : (existingRecord?.["Worked At"] || "Clock Out"),
       [type === 'In' ? "Time In" : "Time Out"]: timeString,
-      "Total Hours": type === 'Out' ? hoursWorked : 0,
+      "Total Hours": type === 'Out' ? hoursWorked : (existingRecord?.["Total Hours"] || 0),
       "Notes": status
     };
 
@@ -275,7 +293,7 @@ function TerminalContent() {
             <h1 className="text-2xl font-black text-center uppercase italic text-slate-900">Kenstar <span className="text-[#007a43]">Setup</span></h1>
             <div className="grid gap-3">
               {Object.entries(SHOP_DATA).map(([id, data]) => (
-                <button key={id} onClick={() => selectBranch(id)} className="p-6 rounded-2xl border-2 border-slate-100 hover:border-[#007a43] font-black uppercase flex justify-between">
+                <button key={id} onClick={() => selectBranch(id)} className="p-6 rounded-2xl border-2 border-slate-100 hover:border-[#007a43] font-black uppercase flex justify-between items-center">
                   {data.name} <Settings2 className="text-[#007a43]" />
                 </button>
               ))}
@@ -294,6 +312,11 @@ function TerminalContent() {
             <button onClick={handleVerify} disabled={loading} className="w-full bg-[#007a43] text-white py-6 rounded-2xl font-black uppercase flex items-center justify-center gap-2">
               {loading ? <Loader2 className="animate-spin" /> : <UserCheck size={20} />} Identify Staff
             </button>
+            <div className="text-center mt-2">
+              <button onClick={reportLag} className="text-[10px] font-black uppercase text-orange-500 hover:underline">
+                Terminal too slow? Report Issue
+              </button>
+            </div>
             <button onClick={() => setStep(0)} className="w-full text-[10px] font-black text-slate-300 uppercase underline mt-4">Switch Branch</button>
           </div>
         )}
@@ -305,7 +328,7 @@ function TerminalContent() {
               <div className="flex items-center justify-center gap-2 mt-1">
                 <MapPin size={12} className={geoError ? "text-red-500" : "text-green-600"} />
                 <span className={`text-[10px] font-bold uppercase ${geoError ? "text-red-500" : "text-green-600"}`}>
-                  {distanceInfo ? `${distanceInfo}m from shop` : "Locating..."} {geoError && "(Too Far)"}
+                  {distanceInfo !== null ? `${distanceInfo}m from shop` : "Locating..."} {geoError && "(Too Far)"}
                 </span>
               </div>
             </div>
@@ -322,7 +345,7 @@ function TerminalContent() {
             <div className="grid gap-4">
               <button 
                 onClick={() => processClock('In')} 
-                disabled={geoError || loading || !distanceInfo || !!existingRecord?.["Time In"]}
+                disabled={geoError || loading || distanceInfo === null || !!existingRecord?.["Time In"]}
                 className={`py-10 rounded-[2.5rem] font-black text-3xl uppercase transition-all ${ (geoError || !!existingRecord?.["Time In"]) ? 'bg-slate-100 text-slate-300' : 'bg-[#007a43] text-white shadow-xl active:scale-95'}`}
               >
                 {existingRecord?.["Time In"] ? "Clocked In" : (geoError ? "Out of Range" : "Clock In")}
