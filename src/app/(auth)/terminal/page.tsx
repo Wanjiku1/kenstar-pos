@@ -33,6 +33,11 @@ function TerminalContent() {
   const [punchResult, setPunchResult] = useState<{status: string, message: string, type: string} | null>(null);
   const [existingRecord, setExistingRecord] = useState<any>(null);
 
+  // --- NEW HELP STATES ---
+  const [showHelp, setShowHelp] = useState(false);
+  const [helpType, setHelpType] = useState('Terminal Lag');
+  const [customIssue, setCustomIssue] = useState('');
+
   const isSunday = currentTime.getDay() === 0;
 
   // 1. Setup Phase
@@ -129,6 +134,8 @@ function TerminalContent() {
     setExistingRecord(null);
     setStaffMember(null);
     setDistanceInfo(null);
+    setShowHelp(false);
+    setCustomIssue('');
   }, []);
 
   useEffect(() => {
@@ -140,7 +147,6 @@ function TerminalContent() {
 
   const checkLocation = useCallback(() => {
     if (!targetCoords || !navigator.geolocation) return;
-    // Added 15s timeout to prevent infinite "Locating..."
     const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
 
     navigator.geolocation.getCurrentPosition((pos) => {
@@ -167,15 +173,36 @@ function TerminalContent() {
     setStep(1);
   };
 
-  const reportLag = async () => {
-    const id = formData.staffId || 'Unknown';
-    toast.info("Reporting terminal lag...");
-    // This assumes you created the 'terminal_issues' table
-    await supabase.from('terminal_issues').insert([{ 
-      employee_id: id === 'Unknown' ? null : id, 
-      issue_type: 'Terminal Lag' 
+  // --- UPDATED HELP SUBMISSION ---
+  const submitHelpTicket = async () => {
+    const idInput = formData.staffId.trim().toUpperCase() || 'Unknown';
+    const shopName = activeBranch ? SHOP_DATA[activeBranch]?.name : 'Unknown Branch';
+    
+    let foundName = "Unknown Staff";
+    try {
+      const cache = JSON.parse(localStorage.getItem('kenstar_staff_cache') || '[]');
+      const matched = cache.find((s: any) => s["Employee Id"] === idInput);
+      if (matched) foundName = matched["Employee Name"];
+    } catch (e) {}
+
+    toast.info("Sending help request...");
+    
+    const { error } = await supabase.from('terminal_issues').insert([{ 
+      employee_id: idInput === 'Unknown' ? null : idInput, 
+      staff_name: foundName,
+      shop: shopName,
+      issue_type: helpType,
+      issue_description: customIssue || `Reported ${helpType}`,
+      created_at: new Date().toISOString() // Explicit timestamp
     }]);
-    toast.success("Reported. Please wait a moment.");
+
+    if (!error) {
+      toast.success("Help request sent!");
+      setShowHelp(false);
+      setCustomIssue('');
+    } else {
+      toast.error("Failed to send report.");
+    }
   };
 
   const handleVerify = async () => {
@@ -288,6 +315,43 @@ function TerminalContent() {
       </div>
 
       <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-2xl p-10 min-h-[550px] flex flex-col justify-center relative overflow-hidden">
+        
+        {/* HELP MODAL OVERLAY */}
+        {showHelp && (
+          <div className="absolute inset-0 bg-white/98 z-50 p-8 flex flex-col justify-center animate-in fade-in zoom-in duration-200">
+            <div className="text-center mb-6">
+              <AlertTriangle className="mx-auto text-orange-500 mb-2" size={32} />
+              <h2 className="text-xl font-black uppercase italic">Support Menu</h2>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Report an issue to management</p>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {['Terminal Lag', 'GPS Error', 'PIN Issue', 'Other'].map((type) => (
+                <button 
+                  key={type}
+                  onClick={() => setHelpType(type)}
+                  className={`p-4 rounded-xl border-2 text-[10px] font-black uppercase transition-all ${helpType === type ? 'border-[#007a43] bg-green-50 text-[#007a43]' : 'border-slate-50 text-slate-400'}`}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+
+            <textarea 
+              className="w-full bg-slate-50 border-2 border-slate-100 rounded-xl p-4 text-[11px] font-bold mb-6 focus:border-[#007a43] outline-none"
+              placeholder="OPTIONAL: DESCRIBE THE PROBLEM..."
+              rows={3}
+              value={customIssue}
+              onChange={(e) => setCustomIssue(e.target.value)}
+            />
+
+            <div className="flex gap-3">
+              <button onClick={() => setShowHelp(false)} className="flex-1 py-4 font-black uppercase text-[10px] text-slate-300">Close</button>
+              <button onClick={submitHelpTicket} className="flex-1 bg-slate-900 text-white py-4 rounded-xl font-black uppercase text-[10px]">Send Help</button>
+            </div>
+          </div>
+        )}
+
         {step === 0 && (
           <div className="space-y-6">
             <h1 className="text-2xl font-black text-center uppercase italic text-slate-900">Kenstar <span className="text-[#007a43]">Setup</span></h1>
@@ -312,15 +376,21 @@ function TerminalContent() {
             <button onClick={handleVerify} disabled={loading} className="w-full bg-[#007a43] text-white py-6 rounded-2xl font-black uppercase flex items-center justify-center gap-2">
               {loading ? <Loader2 className="animate-spin" /> : <UserCheck size={20} />} Identify Staff
             </button>
+            
             <div className="text-center mt-2">
-              <button onClick={reportLag} className="text-[10px] font-black uppercase text-orange-500 hover:underline">
-                Terminal too slow? Report Issue
+              <button 
+                onClick={() => setShowHelp(true)} 
+                className="text-[10px] font-black uppercase text-slate-300 hover:text-orange-500 transition-colors flex items-center justify-center gap-1 mx-auto"
+              >
+                <AlertTriangle size={12} /> Help / Report Issue
               </button>
             </div>
+
             <button onClick={() => setStep(0)} className="w-full text-[10px] font-black text-slate-300 uppercase underline mt-4">Switch Branch</button>
           </div>
         )}
 
+        {/* ... Step 2 & 3 remain the same ... */}
         {step === 2 && staffMember && (
           <div className="text-center space-y-6">
             <div className="bg-green-50 py-4 rounded-2xl border-2 border-green-100">
@@ -372,11 +442,9 @@ function TerminalContent() {
                <AlertTriangle size={80} className="text-orange-500 mx-auto animate-pulse" />
             )}
             <div className="space-y-2">
-              {punchResult?.type === 'In' && (
-                <h2 className={`text-3xl font-black uppercase italic ${punchResult?.status === 'On Time' ? 'text-green-600' : 'text-orange-600'}`}>
-                  {punchResult?.status}
-                </h2>
-              )}
+              <h2 className={`text-3xl font-black uppercase italic ${punchResult?.status === 'On Time' ? 'text-green-600' : 'text-orange-600'}`}>
+                {punchResult?.status}
+              </h2>
               <p className="text-2xl font-black text-slate-800 uppercase leading-tight">
                 {punchResult?.type === 'In' 
                   ? (punchResult.status === 'Late Arrival' ? "Please be on time tomorrow!" : "Have a good day!")
