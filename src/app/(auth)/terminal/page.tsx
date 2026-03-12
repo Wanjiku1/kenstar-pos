@@ -14,7 +14,6 @@ const SHOP_DATA: Record<string, { lat: number; lng: number; name: string }> = {
   'Stage': { lat: -1.283971, lng: 36.887177, name: 'Stage Outlet' }
 };
 
-// --- TERMINAL CONTENT COMPONENT ---
 function TerminalContent() {
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -33,14 +32,12 @@ function TerminalContent() {
   const [punchResult, setPunchResult] = useState<{status: string, message: string, type: string} | null>(null);
   const [existingRecord, setExistingRecord] = useState<any>(null);
 
-  // --- NEW HELP STATES ---
   const [showHelp, setShowHelp] = useState(false);
   const [helpType, setHelpType] = useState('Terminal Lag');
   const [customIssue, setCustomIssue] = useState('');
 
   const isSunday = currentTime.getDay() === 0;
 
-  // 1. Setup Phase
   useEffect(() => {
     setMounted(true);
     setIsOnline(navigator.onLine);
@@ -64,7 +61,6 @@ function TerminalContent() {
     }
   }, [searchParams]);
 
-  // 2. Presence Tracking
   useEffect(() => {
     if (staffMember && userCoords && isOnline) {
       const channel = supabase.channel('active-staff-map', {
@@ -86,24 +82,36 @@ function TerminalContent() {
     }
   }, [staffMember, userCoords, isOnline]);
 
-  // 3. Network & Cache Sync
   const updateStaffCache = useCallback(async () => {
     if (!navigator.onLine) return;
     const { data } = await supabase.from('staff').select('*');
     if (data) localStorage.setItem('kenstar_staff_cache', JSON.stringify(data));
   }, []);
 
+  // --- UPDATED SYNC LOGIC FOR BOTH ATTENDANCE & ISSUES ---
   const syncOfflineRecords = useCallback(async () => {
-    const queue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
-    if (queue.length === 0) return;
-    let successCount = 0;
-    for (const record of queue) {
-      const { error } = await supabase.from('attendance').upsert(record, { onConflict: 'Employee Id, Date' });
-      if (!error) successCount++;
+    // 1. Sync Attendance
+    const attQueue = JSON.parse(localStorage.getItem('kenstar_offline_queue') || '[]');
+    if (attQueue.length > 0) {
+      let attSuccess = 0;
+      for (const record of attQueue) {
+        const { error } = await supabase.from('attendance').upsert(record, { onConflict: 'Employee Id, Date' });
+        if (!error) attSuccess++;
+      }
+      if (attSuccess > 0) {
+        toast.success(`Synced ${attSuccess} attendance records!`);
+        localStorage.setItem('kenstar_offline_queue', '[]');
+      }
     }
-    if (successCount > 0) {
-      toast.success(`Synced ${successCount} offline records!`);
-      localStorage.setItem('kenstar_offline_queue', '[]');
+
+    // 2. Sync Terminal Issues
+    const issueQueue = JSON.parse(localStorage.getItem('kenstar_issue_queue') || '[]');
+    if (issueQueue.length > 0) {
+      const { error } = await supabase.from('terminal_issues').insert(issueQueue);
+      if (!error) {
+        toast.success(`Synced ${issueQueue.length} help tickets!`);
+        localStorage.setItem('kenstar_issue_queue', '[]');
+      }
     }
   }, []);
 
@@ -173,7 +181,7 @@ function TerminalContent() {
     setStep(1);
   };
 
-  // --- UPDATED HELP SUBMISSION ---
+  // --- UPDATED OFFLINE-READY HELP SUBMISSION ---
   const submitHelpTicket = async () => {
     const idInput = formData.staffId.trim().toUpperCase() || 'Unknown';
     const shopName = activeBranch ? SHOP_DATA[activeBranch]?.name : 'Unknown Branch';
@@ -185,24 +193,37 @@ function TerminalContent() {
       if (matched) foundName = matched["Employee Name"];
     } catch (e) {}
 
-    toast.info("Sending help request...");
-    
-    const { error } = await supabase.from('terminal_issues').insert([{ 
+    const ticketData = { 
       employee_id: idInput === 'Unknown' ? null : idInput, 
       staff_name: foundName,
       shop: shopName,
       issue_type: helpType,
       issue_description: customIssue || `Reported ${helpType}`,
-      created_at: new Date().toISOString() // Explicit timestamp
-    }]);
+      created_at: new Date().toISOString()
+    };
 
-    if (!error) {
-      toast.success("Help request sent!");
+    if (isOnline) {
+      toast.info("Sending help request...");
+      const { error } = await supabase.from('terminal_issues').insert([ticketData]);
+      if (!error) {
+        toast.success("Help request sent!");
+        setShowHelp(false);
+        setCustomIssue('');
+      } else {
+        toast.error("Cloud error. Saving to local queue.");
+        saveTicketToQueue(ticketData);
+      }
+    } else {
+      saveTicketToQueue(ticketData);
+      toast.warning("Offline: Issue saved & will sync later.");
       setShowHelp(false);
       setCustomIssue('');
-    } else {
-      toast.error("Failed to send report.");
     }
+  };
+
+  const saveTicketToQueue = (ticket: any) => {
+    const queue = JSON.parse(localStorage.getItem('kenstar_issue_queue') || '[]');
+    localStorage.setItem('kenstar_issue_queue', JSON.stringify([...queue, ticket]));
   };
 
   const handleVerify = async () => {
@@ -316,7 +337,6 @@ function TerminalContent() {
 
       <div className="w-full max-w-md bg-white rounded-[3.5rem] shadow-2xl p-10 min-h-[550px] flex flex-col justify-center relative overflow-hidden">
         
-        {/* HELP MODAL OVERLAY */}
         {showHelp && (
           <div className="absolute inset-0 bg-white/98 z-50 p-8 flex flex-col justify-center animate-in fade-in zoom-in duration-200">
             <div className="text-center mb-6">
@@ -390,7 +410,6 @@ function TerminalContent() {
           </div>
         )}
 
-        {/* ... Step 2 & 3 remain the same ... */}
         {step === 2 && staffMember && (
           <div className="text-center space-y-6">
             <div className="bg-green-50 py-4 rounded-2xl border-2 border-green-100">
@@ -459,7 +478,6 @@ function TerminalContent() {
   );
 }
 
-// --- MAIN EXPORT WRAPPED IN SUSPENSE ---
 export default function TerminalPage() {
   return (
     <Suspense fallback={
