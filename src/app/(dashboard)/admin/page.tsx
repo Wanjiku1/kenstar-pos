@@ -15,7 +15,6 @@ import {
 import Link from 'next/link';
 import { toast } from 'sonner';
 
-// Map component handled with No SSR
 const MapWithNoSSR = dynamic<any>(() => import('../../../components/MapComponent').then((mod) => mod.default), { 
   ssr: false,
   loading: () => (
@@ -84,6 +83,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     getMasterData();
 
+    // 1. ISSUES SUBSCRIPTION
     const issueSubscription = supabase
       .channel('hq-issue-alerts')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'terminal_issues' }, (payload) => {
@@ -95,28 +95,52 @@ export default function AdminDashboard() {
       })
       .subscribe();
 
+    // 2. PRESENCE CHANNEL (The Map Signals)
     const channel = supabase.channel('active-staff-map', { 
-      config: { presence: { key: 'admin' } } 
+      config: { presence: { key: 'admin-hq' } } 
     });
     
     channel
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
         const staffList: any[] = [];
+        
         Object.keys(state).forEach((key) => {
-          if (key === 'admin') return;
+          // Skip if the signal is from the Admin Dashboard itself
+          if (key === 'admin-hq') return;
+
           state[key].forEach((pres: any) => {
             const lat = Number(pres.lat);
             const lng = Number(pres.lng);
-            if (!isNaN(lat) && !isNaN(lng) && lat !== 0) {
-              staffList.push({ ...pres, lat, lng, name: pres.name || "Unknown Unit" });
+            
+            // Validate coordinates and prevent showing HQ-Control on the staff list
+            if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && pres.name !== 'HQ-Control') {
+              staffList.push({ 
+                ...pres, 
+                lat, 
+                lng, 
+                name: pres.name || "Unknown Unit" 
+              });
             }
           });
         });
         setActiveStaff(staffList);
       })
       .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') await channel.track({ role: 'admin', online_at: new Date().toISOString() });
+        if (status === 'SUBSCRIBED') {
+          // Force authorization on the socket for Free Tier stability
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            await supabase.realtime.setAuth(session.access_token);
+            
+            // Broadcast the Admin presence to "wake up" the channel
+            await channel.track({ 
+              role: 'admin', 
+              name: 'HQ-Control',
+              online_at: new Date().toISOString() 
+            });
+          }
+        }
       });
 
     return () => { 
@@ -135,8 +159,6 @@ export default function AdminDashboard() {
   return (
     <RoleGate allowedRoles={['founder', 'admin']}>
       <div className="flex h-screen bg-[#f8fafc] overflow-hidden font-sans">
-        
-        {/* SIDEBAR */}
         <aside className="w-72 bg-slate-900 text-white flex flex-col shrink-0 shadow-2xl">
           <div className="p-8">
             <h1 className="text-2xl font-black tracking-tighter italic leading-none">KENSTAR <span className="text-[#007a43]">HQ</span></h1>
@@ -145,7 +167,6 @@ export default function AdminDashboard() {
 
           <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
               <Link href="/admin"><NavItem icon={<LayoutDashboard size={18}/>} label="HQ Overview" active /></Link>
-              
               <Link href="/admin/terminal-issues" className="relative group">
                 <NavItem 
                   icon={<LifeBuoy size={18} className={stats.pendingIssuesCount > 0 ? "text-red-500 animate-pulse" : "text-slate-400"} />} 
@@ -157,22 +178,11 @@ export default function AdminDashboard() {
                   </span>
                 )}
               </Link>
-
-              <Link href="/admin/performance">
-                <NavItem icon={<Award size={18} className="text-amber-400" />} label="Performance Card" />
-              </Link>
-
+              <Link href="/admin/performance"><NavItem icon={<Award size={18} className="text-amber-400" />} label="Performance Card" /></Link>
               <Link href="/admin/attendance"><NavItem icon={<Database size={18} className="text-blue-400" />} label="Staff Records Terminal" /></Link>
-              
               <div className="h-px bg-white/5 my-4 mx-4" />
-              
               <Link href="/pos"><NavItem icon={<ShoppingCart size={18}/>} label="POS Terminal" /></Link>
-              
-              {/* QR STATION LINK ADDED HERE */}
-              <Link href="/qr-station">
-                <NavItem icon={<QrCode size={18} className="text-purple-400" />} label="QR Station" />
-              </Link>
-              
+              <Link href="/qr-station"><NavItem icon={<QrCode size={18} className="text-purple-400" />} label="QR Station" /></Link>
               <Link href="/inventory"><NavItem icon={<Package size={18}/>} label="Inventory Master" /></Link>
               <Link href="/admin/users"><NavItem icon={<ShieldCheck size={18} className="text-amber-400" />} label="Security" /></Link>
           </nav>
@@ -184,7 +194,6 @@ export default function AdminDashboard() {
           </div>
         </aside>
 
-        {/* MAIN HQ VIEW */}
         <main className="flex-1 overflow-y-auto p-10 space-y-8">
           <header className="flex justify-between items-center">
             <div className="flex items-center gap-6">
@@ -201,14 +210,12 @@ export default function AdminDashboard() {
             <UserProfile />
           </header>
 
-          {/* TOP STATS */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <StatCard title="Today's Revenue" value={`KES ${stats.todaySales.toLocaleString()}`} icon={<Banknote />} color="bg-green-600" />
             <StatCard title="Total Stock Value" value={`KES ${stats.totalStockValue.toLocaleString()}`} icon={<Package />} color="bg-blue-600" />
             <StatCard title="Overtime Sessions" value={stats.overtimeCount.toString()} icon={<Clock />} color="bg-slate-900" />
           </div>
 
-          {/* OUTSTANDING PERFORMANCE QUICK ACTION */}
           <Link href="/admin/performance" className="block group">
             <div className="bg-gradient-to-r from-[#007a43] to-green-500 p-8 rounded-[3rem] shadow-xl shadow-green-100 flex items-center justify-between transition-all hover:scale-[1.01] active:scale-[0.99]">
               <div className="flex items-center gap-8">
@@ -218,9 +225,7 @@ export default function AdminDashboard() {
                 <div>
                   <p className="text-white/60 text-[10px] font-black uppercase tracking-[0.3em]">Quality Management</p>
                   <h3 className="text-white text-3xl font-black uppercase italic leading-none mt-1">Staff Performance Scoring</h3>
-                  <p className="text-white/80 text-[11px] font-bold mt-2 flex items-center gap-2 uppercase">
-                    <TrendingUp size={14} /> Tap here to log daily ratings and view leaderboard
-                  </p>
+                  <p className="text-white/80 text-[11px] font-bold mt-2 flex items-center gap-2 uppercase"><TrendingUp size={14} /> Tap here to log daily ratings and view leaderboard</p>
                 </div>
               </div>
               <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center text-[#007a43] shadow-lg group-hover:translate-x-2 transition-transform">
@@ -229,7 +234,6 @@ export default function AdminDashboard() {
             </div>
           </Link>
 
-          {/* MAP AND PRESENCE GRID */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
             <div className="lg:col-span-2 bg-white rounded-[3rem] shadow-xl overflow-hidden border-4 border-white relative">
               <div className="absolute top-6 left-6 z-[400] bg-white/90 backdrop-blur-md border border-slate-200 text-slate-900 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-sm">
@@ -261,9 +265,7 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* LOWER ALERTS GRID (VIOLATION LOG & SUPPORT QUEUE) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-10">
-            {/* VIOLATION LOG */}
             <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-200">
                 <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6 flex items-center gap-2">
                   <AlertTriangle size={16} className="text-red-500" /> Violation Log (Late Arrival)
@@ -278,13 +280,10 @@ export default function AdminDashboard() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-10">
-                    <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em] italic text-center">Operational Status: All Staff on Schedule</p>
-                  </div>
+                  <div className="text-center py-10"><p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em] italic text-center">Operational Status: All Staff on Schedule</p></div>
                 )}
             </div>
 
-            {/* QUICK SUPPORT PREVIEW */}
             <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-200">
                 <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6 flex items-center gap-2">
                   <LifeBuoy size={16} className="text-[#007a43]" /> Support Queue
@@ -297,9 +296,7 @@ export default function AdminDashboard() {
                     </div>
                   </Link>
                 ) : (
-                  <div className="text-center py-10 opacity-40">
-                    <p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em] italic text-center">System Health: Normal</p>
-                  </div>
+                  <div className="text-center py-10 opacity-40"><p className="text-slate-400 font-bold text-[10px] uppercase tracking-[0.2em] italic text-center">System Health: Normal</p></div>
                 )}
             </div>
           </div>
@@ -316,9 +313,7 @@ function StatCard({ title, value, icon, color }: any) {
         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{title}</p>
         <p className="text-3xl font-black text-slate-900 mt-2 tracking-tighter leading-none">{value}</p>
       </div>
-      <div className={`w-14 h-14 ${color} rounded-2xl flex items-center justify-center text-white shadow-lg`}>
-        {icon}
-      </div>
+      <div className={`w-14 h-14 ${color} rounded-2xl flex items-center justify-center text-white shadow-lg`}>{icon}</div>
     </div>
   );
 }
@@ -326,9 +321,7 @@ function StatCard({ title, value, icon, color }: any) {
 function NavItem({ icon, label, active = false, className = "" }: any) {
   return (
     <div className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-bold transition-all cursor-pointer ${
-      active 
-        ? 'bg-[#007a43] text-white shadow-lg shadow-green-900/40' 
-        : 'text-slate-400 hover:bg-white/5 hover:text-white'
+      active ? 'bg-[#007a43] text-white shadow-lg shadow-green-900/40' : 'text-slate-400 hover:bg-white/5 hover:text-white'
     } ${className}`}>
       {icon} <span className="text-[11px] uppercase tracking-wider">{label}</span>
     </div>
