@@ -65,6 +65,18 @@ export default function AdminDashboard() {
       let val = 0;
       stock.data?.forEach(i => val += (i.stock_quantity * (i.cost_price || 0)));
 
+      // 1. FILTER CLOCKED-IN STAFF FOR THE MAP
+      // We look for records today where "Time Out" is empty/null
+      const currentDuty = attendance.data?.filter(r => !r["Time Out"]) || [];
+      const mappedStaff = currentDuty.map(staff => ({
+        name: staff["Employee Name"],
+        lat: Number(staff.lat) || -1.286389, // Default to Nairobi if no GPS
+        lng: Number(staff.lng) || 36.817223,
+        status: 'Active'
+      }));
+
+      setActiveStaff(mappedStaff);
+
       setStats({
         todaySales: sales.data?.reduce((sum, s) => sum + (s.total_amount || 0), 0) || 0,
         lowStockCount: stock.data?.filter(i => i.stock_quantity < 10).length || 0,
@@ -83,7 +95,15 @@ export default function AdminDashboard() {
   useEffect(() => {
     getMasterData();
 
-    // 1. ISSUES SUBSCRIPTION
+    // 2. ATTENDANCE REALTIME LISTENER
+    // This updates the count immediately when someone clocks in/out
+    const attendanceSub = supabase
+      .channel('live-attendance-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
+        getMasterData();
+      })
+      .subscribe();
+
     const issueSubscription = supabase
       .channel('hq-issue-alerts')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'terminal_issues' }, (payload) => {
@@ -95,56 +115,8 @@ export default function AdminDashboard() {
       })
       .subscribe();
 
-    // 2. PRESENCE CHANNEL (The Map Signals)
-    const channel = supabase.channel('active-staff-map', { 
-      config: { presence: { key: 'admin-hq' } } 
-    });
-    
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const staffList: any[] = [];
-        
-        Object.keys(state).forEach((key) => {
-          // Skip if the signal is from the Admin Dashboard itself
-          if (key === 'admin-hq') return;
-
-          state[key].forEach((pres: any) => {
-            const lat = Number(pres.lat);
-            const lng = Number(pres.lng);
-            
-            // Validate coordinates and prevent showing HQ-Control on the staff list
-            if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && pres.name !== 'HQ-Control') {
-              staffList.push({ 
-                ...pres, 
-                lat, 
-                lng, 
-                name: pres.name || "Unknown Unit" 
-              });
-            }
-          });
-        });
-        setActiveStaff(staffList);
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          // Force authorization on the socket for Free Tier stability
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
-            await supabase.realtime.setAuth(session.access_token);
-            
-            // Broadcast the Admin presence to "wake up" the channel
-            await channel.track({ 
-              role: 'admin', 
-              name: 'HQ-Control',
-              online_at: new Date().toISOString() 
-            });
-          }
-        }
-      });
-
     return () => { 
-      channel.unsubscribe();
+      supabase.removeChannel(attendanceSub);
       supabase.removeChannel(issueSubscription);
     };
   }, []);

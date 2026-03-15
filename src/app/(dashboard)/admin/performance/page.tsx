@@ -95,7 +95,7 @@ export default function PerformanceManager() {
           </button>
           <div>
             <h1 className="text-2xl font-black uppercase italic tracking-tighter text-slate-900">Performance Card</h1>
-            <p className="text-[10px] font-bold text-[#007a43] uppercase tracking-widest mt-1">Ghost Quality Monitoring</p>
+            <p className="text-[10px] font-bold text-[#007a43] uppercase tracking-widest mt-1">Staff Quality Monitoring</p>
           </div>
         </header>
 
