@@ -65,12 +65,12 @@ export default function AdminDashboard() {
       let val = 0;
       stock.data?.forEach(i => val += (i.stock_quantity * (i.cost_price || 0)));
 
-      // 1. FILTER CLOCKED-IN STAFF FOR THE MAP
-      // We look for records today where "Time Out" is empty/null
+      // FILTER CLOCKED-IN STAFF WITH SHOP NAMES
       const currentDuty = attendance.data?.filter(r => !r["Time Out"]) || [];
       const mappedStaff = currentDuty.map(staff => ({
         name: staff["Employee Name"],
-        lat: Number(staff.lat) || -1.286389, // Default to Nairobi if no GPS
+        shop: staff["Shop"] || staff["Location"] || "Main Unit",
+        lat: Number(staff.lat) || -1.286389,
         lng: Number(staff.lng) || 36.817223,
         status: 'Active'
       }));
@@ -94,9 +94,6 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     getMasterData();
-
-    // 2. ATTENDANCE REALTIME LISTENER
-    // This updates the count immediately when someone clocks in/out
     const attendanceSub = supabase
       .channel('live-attendance-feed')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
@@ -182,12 +179,14 @@ export default function AdminDashboard() {
             <UserProfile />
           </header>
 
+          {/* Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <StatCard title="Today's Revenue" value={`KES ${stats.todaySales.toLocaleString()}`} icon={<Banknote />} color="bg-green-600" />
             <StatCard title="Total Stock Value" value={`KES ${stats.totalStockValue.toLocaleString()}`} icon={<Package />} color="bg-blue-600" />
             <StatCard title="Overtime Sessions" value={stats.overtimeCount.toString()} icon={<Clock />} color="bg-slate-900" />
           </div>
 
+          {/* Banner */}
           <Link href="/admin/performance" className="block group">
             <div className="bg-gradient-to-r from-[#007a43] to-green-500 p-8 rounded-[3rem] shadow-xl shadow-green-100 flex items-center justify-between transition-all hover:scale-[1.01] active:scale-[0.99]">
               <div className="flex items-center gap-8">
@@ -206,6 +205,7 @@ export default function AdminDashboard() {
             </div>
           </Link>
 
+          {/* FIX 1: Fixed Height Grid for Map & List */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[500px]">
             <div className="lg:col-span-2 bg-white rounded-[3rem] shadow-xl overflow-hidden border-4 border-white relative">
               <div className="absolute top-6 left-6 z-[400] bg-white/90 backdrop-blur-md border border-slate-200 text-slate-900 px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-sm">
@@ -214,29 +214,40 @@ export default function AdminDashboard() {
               <MapWithNoSSR staffLocations={activeStaff} />
             </div>
 
-            <div className="bg-white rounded-[3rem] shadow-xl p-8 border border-slate-200 flex flex-col">
-              <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6 border-b pb-4 shrink-0">Live Presence ({activeStaff.length})</h3>
-              <div className="space-y-4 overflow-y-auto flex-1 pr-2">
+            {/* FIX 2: Fixed Height and Scrollable Live Presence */}
+            <div className="bg-white rounded-[3rem] shadow-xl p-8 border border-slate-200 flex flex-col h-full max-h-[500px]">
+              <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6 border-b pb-4 shrink-0 flex justify-between items-center">
+                <span>Live Presence</span>
+                <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-[10px]">{activeStaff.length}</span>
+              </h3>
+              
+              <div className="space-y-3 overflow-y-auto flex-1 pr-2">
                 {activeStaff.length > 0 ? activeStaff.map((staff, i) => (
-                  <div key={i} className="flex items-center gap-4 p-3 bg-slate-50 rounded-2xl border border-slate-100">
-                    <div className="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center text-white font-black text-xs shadow-md uppercase">
+                  <div key={i} className="flex items-center gap-4 p-3 bg-slate-50 rounded-2xl border border-slate-100 shrink-0">
+                    <div className="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center text-white font-black text-xs shadow-md uppercase shrink-0">
                       {staff.name?.charAt(0)}
                     </div>
-                    <div>
-                      <p className="font-black text-slate-800 text-[11px] uppercase tracking-tight">{staff.name}</p>
-                      <p className="text-[9px] text-green-600 font-bold uppercase tracking-tighter italic mt-1">Status: Active</p>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-black text-slate-800 text-[11px] uppercase tracking-tight truncate">{staff.name}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[8px] bg-[#007a43]/10 text-[#007a43] px-1.5 py-0.5 rounded font-black uppercase tracking-tighter">
+                          {staff.shop}
+                        </span>
+                        <span className="text-[8px] text-green-600 font-bold uppercase italic">Active</span>
+                      </div>
                     </div>
                   </div>
                 )) : (
-                  <div className="h-full flex flex-col items-center justify-center opacity-40 grayscale text-center">
-                    <Users size={40} className="mb-2 text-slate-400 mx-auto" />
-                    <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest leading-tight">No Active Signals</p>
+                  <div className="h-full flex flex-col items-center justify-center opacity-40 grayscale text-center py-10">
+                    <Users size={32} className="mb-2 text-slate-400 mx-auto" />
+                    <p className="text-slate-500 font-bold text-[9px] uppercase tracking-widest leading-tight">No Active Signals</p>
                   </div>
                 )}
               </div>
             </div>
           </div>
 
+          {/* Bottom Cards Row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-10">
             <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-200">
                 <h3 className="font-black text-slate-900 uppercase text-xs tracking-widest mb-6 flex items-center gap-2">
