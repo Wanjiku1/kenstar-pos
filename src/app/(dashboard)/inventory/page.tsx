@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Package, Users, Landmark, Search, Plus, Wallet, Loader2 } from 'lucide-react'; 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { RoleGate } from "@/components/auth/role-gate"; // Enforcing the gate
+import { RoleGate } from "@/components/auth/role-gate";
 
 // Modular Components
 import { StockTable } from './stock-table';
@@ -27,20 +27,16 @@ export default function InventoryPage() {
   const [payroll, setPayroll] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // FETCH ALL DATA FROM SUPABASE
   const fetchAllData = useCallback(async () => {
     setLoading(true);
     try {
-      // 1. Fetch Products
-      const { data: invData } = await supabase.from('product_variants').select('*, products(name)').order('stock_quantity');
-      
-      // 2. Fetch Staff
+      const { data: invData } = await supabase
+        .from('product_variants')
+        .select('*, products(name)')
+        .order('stock_quantity', { ascending: false });
+
       const { data: staffData } = await supabase.from('staff').select('*');
-      
-      // 3. Fetch Sales Data
       const { data: salesData } = await supabase.from('sales').select('*').order('created_at', { ascending: false });
-      
-      // 4. Fetch Payroll Calculations
       const { data: payrollData } = await supabase.from('payroll_calculations').select('*');
 
       if (payrollData) setPayroll(payrollData);
@@ -60,79 +56,77 @@ export default function InventoryPage() {
 
   const filteredItems = items.filter(item => 
     item.products?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.sku?.toLowerCase().includes(searchQuery.toLowerCase())
+    item.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.school_name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
     <RoleGate allowedRoles={['founder', 'admin', 'manager']}>
-      <div className="p-8 bg-slate-50 min-h-screen space-y-8 relative z-10">
-        {/* HEADER SECTION */}
+      <div className="p-8 bg-[#f8fafc] min-h-screen space-y-8 relative z-10 font-sans">
+        
+        {/* Kenstar Branded Header */}
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Package size={16} className="text-emerald-600" />
-              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600">Inventory Hub</span>
+          <div className="flex items-center gap-6">
+            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-200">
+              <Package size={20} className="text-[#007a43]" />
             </div>
-            <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase italic">KENSTAR OPS</h1>
-            <p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-1">Manager Terminal • Kenya HQ</p>
+            <div>
+              <h1 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">KENSTAR OPS</h1>
+              <p className="text-[10px] font-bold text-blue-600 uppercase flex items-center gap-1 mt-1">
+                <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-pulse mr-2" /> Global Inventory Feed
+              </p>
+            </div>
           </div>
 
           <div className="flex gap-2">
-            <Button 
-              onClick={() => setIsProductModalOpen(true)}
-              className="bg-slate-900 text-white rounded-xl font-black text-xs uppercase h-11 px-6 shadow-sm hover:bg-slate-800 transition-all"
-            >
+            <Button onClick={() => setIsProductModalOpen(true)} className="bg-slate-900 text-white rounded-xl font-black text-xs uppercase h-11 px-6 shadow-sm hover:bg-slate-800 transition-all">
               <Plus size={16} className="mr-2" /> Add Product
             </Button>
-            <Button 
-              onClick={() => setIsStaffModalOpen(true)}
-              className="bg-blue-600 text-white rounded-xl font-black text-xs uppercase h-11 px-6 shadow-sm hover:bg-blue-700 transition-all"
-            >
+            <Button onClick={() => setIsStaffModalOpen(true)} className="bg-[#007a43] text-white rounded-xl font-black text-xs uppercase h-11 px-6 shadow-sm hover:bg-[#006235] transition-all">
               <Plus size={16} className="mr-2" /> Add Staff
             </Button>
           </div>
         </header>
 
-        {/* SEARCH BAR SECTION */}
+        {/* Search Bar matching HQ Analytics toggle aesthetics */}
         <div className="relative w-full md:w-96 group">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={18} />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#007a43] transition-colors" size={18} />
           <Input 
-            placeholder="Search uniforms or SKUs..." 
-            className="pl-12 bg-white border-slate-200 rounded-2xl h-14 font-bold text-slate-700 shadow-sm focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all"
+            placeholder="Search uniforms, SKUs, or Schools..." 
+            className="pl-12 bg-white border-slate-200 rounded-2xl h-14 font-bold text-slate-700 shadow-sm focus:ring-4 focus:ring-[#007a43]/10 focus:border-[#007a43] outline-none transition-all"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
 
-        {/* STATS SECTION */}
         <InventoryStats items={items} staffCount={staff.length} />
 
-        {/* TABS SECTION */}
+        {/* Kenstar Active Tabs matching Admin sidebar selectors! */}
         <Tabs defaultValue="stock" className="w-full">
           <TabsList className="bg-slate-200/50 mb-8 p-1.5 h-auto gap-1 rounded-2xl border border-slate-200 shadow-inner">
-            <TabsTrigger value="stock" className="gap-2 px-6 py-3 rounded-xl font-black text-[10px] uppercase data-[state=active]:bg-white data-[state=active]:shadow-md transition-all">
+            <TabsTrigger value="stock" className="gap-2 px-6 py-3 rounded-xl font-black text-[10px] uppercase data-[state=active]:bg-[#007a43] data-[state=active]:text-white data-[state=active]:shadow-lg transition-all text-slate-500">
               <Package size={14}/> Stock
             </TabsTrigger>
-            <TabsTrigger value="staff" className="gap-2 px-6 py-3 rounded-xl font-black text-[10px] uppercase data-[state=active]:bg-white data-[state=active]:shadow-md transition-all">
+            <TabsTrigger value="staff" className="gap-2 px-6 py-3 rounded-xl font-black text-[10px] uppercase data-[state=active]:bg-[#007a43] data-[state=active]:text-white data-[state=active]:shadow-lg transition-all text-slate-500">
               <Users size={14}/> Operations
             </TabsTrigger>
-            <TabsTrigger value="payout" className="gap-2 px-6 py-3 rounded-xl font-black text-[10px] uppercase data-[state=active]:bg-white data-[state=active]:shadow-md transition-all">
+            <TabsTrigger value="payout" className="gap-2 px-6 py-3 rounded-xl font-black text-[10px] uppercase data-[state=active]:bg-[#007a43] data-[state=active]:text-white data-[state=active]:shadow-lg transition-all text-slate-500">
               <Wallet size={14}/> Payouts
             </TabsTrigger>
-            <TabsTrigger value="accounting" className="gap-2 px-6 py-3 rounded-xl font-black text-[10px] uppercase data-[state=active]:bg-white data-[state=active]:shadow-md transition-all">
+            <TabsTrigger value="accounting" className="gap-2 px-6 py-3 rounded-xl font-black text-[10px] uppercase data-[state=active]:bg-[#007a43] data-[state=active]:text-white data-[state=active]:shadow-lg transition-all text-slate-500">
               <Landmark size={14}/> Accounting
             </TabsTrigger>
           </TabsList>
 
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[2.5rem] border border-dashed border-slate-200">
-              <Loader2 className="animate-spin text-blue-600 mb-4" size={32} />
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Aggregating Global Inventory...</p>
+            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-[3rem] border border-slate-200 shadow-xl">
+              <Loader2 className="animate-spin text-[#007a43] mb-4" size={32} />
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Waking HQ Nodes...</p>
             </div>
           ) : (
             <>
               <TabsContent value="stock" className="outline-none">
-                <StockTable items={filteredItems} />
+                <StockTable items={filteredItems} onRefresh={fetchAllData} />
               </TabsContent>
 
               <TabsContent value="staff" className="outline-none">
@@ -150,18 +144,8 @@ export default function InventoryPage() {
           )}
         </Tabs>
 
-        {/* MODAL SECTION */}
-        <AddProductModal 
-          isOpen={isProductModalOpen} 
-          onClose={() => setIsProductModalOpen(false)} 
-          onSuccess={fetchAllData} 
-        />
-        
-        <AddStaffModal 
-          isOpen={isStaffModalOpen} 
-          onClose={() => setIsStaffModalOpen(false)} 
-          onSuccess={fetchAllData} 
-        />
+        <AddProductModal isOpen={isProductModalOpen} onClose={() => setIsProductModalOpen(false)} onSuccess={fetchAllData} />
+        <AddStaffModal isOpen={isStaffModalOpen} onClose={() => setIsStaffModalOpen(false)} onSuccess={fetchAllData} />
       </div>
     </RoleGate>
   );
