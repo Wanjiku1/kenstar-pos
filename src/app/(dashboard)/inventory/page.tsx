@@ -73,7 +73,7 @@ export default function InventoryPage() {
             <div>
               <h1 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">KENSTAR OPS</h1>
               <p className="text-[10px] font-bold text-blue-600 uppercase flex items-center gap-1 mt-1">
-                <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-pulse mr-2" /> Global Inventory Feed
+                <span className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-pulse mr-2" /> Kenstar Inventory Feed
               </p>
             </div>
           </div>
