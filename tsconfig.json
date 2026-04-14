@@ -29,6 +29,6 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "**/*.mts"
-  ],
+, "src/app/(dashboard)/inventory/bulk-add-tool.tsk", "src/components/BulkAddTool.tsk", "src/components/BulkAddTool.tsk"  ],
   "exclude": ["node_modules"]
 }

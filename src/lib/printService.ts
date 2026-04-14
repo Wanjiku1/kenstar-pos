@@ -10,18 +10,24 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
   const logoUrl = "https://usuncgqfmawjsqwerala.supabase.co/storage/v1/object/public/assets/Kenstar%20uniform_prev_ui.png";
   const saleNumber = `S${Date.now().toString().slice(-10)}`;
   
-  // Logic to handle Cash vs M-Pesa display on receipt
+  // Payment Logic
   const isCash = saleData.payment_method === 'cash';
-  const tenderedAmount = isCash ? Number(saleData.amount_paid) : total;
-  const changeAmount = isCash ? Number(saleData.change) : 0;
+  const tenderedAmount = Number(saleData.amount_paid) || total;
+  const changeAmount = Number(saleData.change) || 0;
+
+  // UPDATED: Calculate Subtotal based on the original prices in the cart
+  const subTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  
+  // UPDATED: Use the discount passed from the POS bargain input
+  const totalSavings = saleData.discount || 0;
 
   const itemsHtml = cart.map(item => `
     <div style="display: flex; justify-content: space-between; font-size: 13px; margin-top: 5px;">
-      <span style="font-weight: bold; flex: 1;">^ ${item.products?.name?.toUpperCase()} [${item.size || 'STD'}]</span>
+      <span style="font-weight: bold; flex: 1;">^ ${(item.products?.name || item.item_name || "ITEM").toUpperCase()} [${item.size || 'STD'}]</span>
       <span style="width: 60px; text-align: right;">KES ${(item.price * item.quantity).toLocaleString()}</span>
     </div>
     <div style="font-size: 11px; margin-left: 10px; color: #333;">
-      ${item.quantity} units @ KES ${item.price.toLocaleString()}/ea
+      ${item.quantity} units @ KES ${item.price.toLocaleString()}/ea 
     </div>
   `).join('');
 
@@ -30,92 +36,77 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
       <head>
         <style>
           @page { size: 80mm auto; margin: 0; }
-          body { 
-            font-family: 'Arial', sans-serif; 
-            width: 72mm; 
-            padding: 4mm; 
-            margin: 0 auto;
-            color: #000;
-            line-height: 1.2;
-          }
+          body { font-family: 'Arial', sans-serif; width: 72mm; padding: 4mm; margin: 0 auto; color: #000; line-height: 1.2; }
           .center { text-align: center; }
           .hr { border-top: 1px solid #000; margin: 8px 0; }
           .bold { font-weight: bold; }
+          .flex-between { display: flex; justify-content: space-between; }
         </style>
-        <link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+128&family=Mr+Dafoe&display=swap" rel="stylesheet">
       </head>
       <body>
-        
         <div class="center">
-          <img src="${logoUrl}" style="width: 80px; height: auto; border-radius: 50%; display: block; margin: 0 auto;" />
-          <h1 style="font-family: 'Mr Dafoe', cursive; font-size: 28px; margin: 0;">We're here to help</h1>
-          <p class="bold" style="margin: 2px 0;">KENSTAR UNIFORMS</p>
-          <p style="font-size: 11px; margin: 0;">UMOJA 1 MARKET, NAIROBI</p>
-          <p style="font-size: 11px; margin: 5px 0;">Phone: +254 722 876 112</p>
+          <img src="${logoUrl}" style="width: 70px; border-radius: 50%; display: block; margin: 0 auto;" />
+          <p class="bold" style="margin: 5px 0;">KENSTAR UNIFORMS</p>
+          <p style="font-size: 10px; margin: 0;">UMOJA 1 MARKET, NAIROBI STALL 315/314</p>
+          <p style="font-size: 10px; margin: 2px 0;">+254 722 876 112</p>
         </div>
 
         <div class="hr"></div>
-        <div class="center bold" style="font-size: 13px;">RECEIPT</div>
+        <div class="center bold" style="font-size: 12px;">OFFICIAL RECEIPT</div>
         <div class="hr"></div>
 
         ${itemsHtml}
 
-        <div class="hr" style="margin-top: 15px;"></div>
+        <div class="hr" style="margin-top: 10px;"></div>
 
-        <div style="font-size: 14px;">
-          <div style="display: flex; justify-content: space-between;">
-            <span>Sub Total</span>
-            <span>KES ${total.toLocaleString()}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; font-size: 18px; font-weight: bold; margin: 5px 0;">
-            <span>Total</span>
+        <div style="font-size: 13px;">
+          <div class="flex-between"><span>Sub Total</span><span>KES ${subTotal.toLocaleString()}</span></div>
+          
+          ${totalSavings > 0 ? `
+          <div class="flex-between" style="color: #000; font-weight: bold; font-size: 11px; margin-top: 2px;">
+            <span>Bargain Discount</span>
+            <span>- KES ${totalSavings.toLocaleString()}</span>
+          </div>` : ''}
+
+          <div class="flex-between" style="font-size: 16px; font-weight: bold; margin: 8px 0; border-top: 1px solid #000; padding-top: 4px;">
+            <span>TOTAL DUE</span>
             <span>KES ${total.toLocaleString()}</span>
           </div>
           
-          <div style="display: flex; justify-content: space-between; border-top: 1px dashed #ccc; pt-2">
-            <span>Tendered ${saleData.payment_method?.toUpperCase()}</span>
+          <div class="flex-between" style="border-top: 1px dashed #ccc; padding-top: 4px;">
+            <span>Paid (${saleData.payment_method?.toUpperCase()})</span>
             <span>KES ${tenderedAmount.toLocaleString()}</span>
           </div>
           
           ${isCash ? `
-          <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold;">
-            <span>Change</span>
+          <div class="flex-between" style="font-weight: bold;">
+            <span>CHANGE</span>
             <span>KES ${changeAmount.toLocaleString()}</span>
           </div>
-          ` : `
-          <div style="display: flex; justify-content: space-between; font-size: 11px;">
-            <span>M-Pesa Ref:</span>
-            <span>${saleData.payment_ref || 'N/A'}</span>
-          </div>
-          `}
+          ` : `<div class="flex-between" style="font-size: 10px;"><span>M-Pesa:</span><span>Confirmed</span></div>`}
         </div>
 
-        <div class="hr" style="margin: 20px 0;"></div>
+        <div class="hr"></div>
+        
+        ${totalSavings > 0 ? `
+        <div class="center bold" style="font-size: 11px; margin-bottom: 10px;">
+          YOU SAVED KES ${totalSavings.toLocaleString()}!
+        </div>
+        ` : ''}
 
-        <div style="display: flex; justify-content: space-between; font-size: 11px;">
-          <span>${new Date().toLocaleDateString()}</span>
-          <span>${new Date().toLocaleTimeString('en-GB')}</span>
-          <span>CASHIER: ${cashierName.toUpperCase()}</span>
+        <div class="flex-between" style="font-size: 9px; opacity: 0.8;">
+          <span>${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}</span>
+          <span>CASHIER: ${cashierName}</span>
         </div>
 
-        <div class="center" style="margin-top: 10px;">
-          <div style="font-family: 'Libre Barcode 128', cursive; font-size: 40px; line-height: 1;">
-            ${saleNumber}
-          </div>
-          <p style="font-size: 10px; margin: 0;">Sale No. ${saleNumber}</p>
-        </div>
-
-        <div class="center" style="font-size: 11px; margin-top: 15px;">
-          <p>Goods once sold cannot be returned.</p>
-          <p class="bold">Thank you for Shopping at Kenstar Uniforms</p>
-          <p style="font-size: 14px; font-weight: 900; margin-top: 5px;">KARIBU KENSTAR</p>
+        <div class="center" style="margin-top: 15px; font-size: 10px;">
+          <p>Sale No: ${saleNumber}</p>
+          <p class="bold">THANK YOU FOR CHOOSING KENSTAR</p>
+          <p style="font-size: 12px; font-weight: 900; margin-top: 5px;">KARIBU TENA KENSTAR UNIFORMS</p>
         </div>
           
         <script>
-          window.onload = function() { 
-            window.print(); 
-            setTimeout(() => window.close(), 700); 
-          };
+          window.onload = function() { window.print(); setTimeout(() => window.close(), 500); };
         </script>
       </body>
     </html>

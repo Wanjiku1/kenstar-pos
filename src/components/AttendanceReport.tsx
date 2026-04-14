@@ -1,151 +1,145 @@
 "use client";
-import { Printer, X, FileText, CheckCircle2, AlertCircle, Package, Clock } from "lucide-react";
+import React from "react";
+import { Printer, X, ShieldCheck, Wallet, CheckCircle2 } from "lucide-react";
 
-export const AttendanceReport = ({ staffName, staffId, records, onClose }: any) => {
-  // --- CALCULATIONS FOR SUMMARY ---
-  const totalDays = records.length;
-  const lates = records.filter((r: any) => r.status === 'Late').length;
-  // Count both 'On Time' and 'Overtime' as successful attendance
-  const onTime = records.filter((r: any) => r.status === 'On Time').length;
-  const overtimes = records.filter((r: any) => r.status === 'Overtime').length;
+export const AttendanceReport = ({ staffName, staffId, records, reportType, totalPay, selectedDate, onClose }: any) => {
+  
+  const handlePrint = () => {
+    window.print();
+  };
 
-  // --- CSV DOWNLOAD LOGIC ---
-  const downloadCSV = () => {
-    const headers = ["Date", "Status", "Time In", "Time Out"];
-    const rows = records.map((r: any) => [
-      r.Date,
-      r.status,
-      r["Time In"] || "-",
-      r["Time Out"] || "-"
-    ].join(","));
-
-    const csvContent = [headers.join(","), ...rows].join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `Kenstar_${staffId}_Report.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const getReportTitle = () => {
+    const d = new Date(selectedDate);
+    if (reportType === 'sunday') return `Sunday Payout Statement`;
+    if (reportType === 'weekly') return `Weekly Earnings Summary`;
+    return `Monthly Statement: ${d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}`;
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center p-4 print:p-0 print:bg-white">
-      <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] print:max-h-none print:shadow-none print:rounded-none">
+    <div className="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-xl flex items-center justify-center p-4 print:p-0 print:static print:bg-white animate-in fade-in duration-300">
+      {/* CRITICAL: Force visibility for print engines with !important */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          body * { visibility: hidden !important; }
+          #printable-report-container, #printable-report-container * { visibility: visible !important; }
+          #printable-report-container { 
+            position: absolute !important; 
+            left: 0 !important; 
+            top: 0 !important; 
+            width: 100% !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
+          .no-print { display: none !important; }
+        }
+      `}} />
+
+      <div id="printable-report-container" className="bg-white w-full max-w-4xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[95vh] print:max-h-none print:shadow-none print:rounded-none border border-white/20">
         
-        {/* ACTION BAR - Hidden on Print */}
-        <div className="p-6 bg-slate-50 border-b flex justify-between items-center print:hidden">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-slate-900 rounded-xl text-white">
-              <FileText size={20} />
+        {/* ACTION BAR (Hidden on Print) */}
+        <div className="p-6 bg-slate-900 flex justify-between items-center print:hidden border-b border-slate-800 no-print">
+          <div className="flex items-center gap-4">
+            <div className="h-11 w-11 bg-emerald-500 rounded-2xl flex items-center justify-center text-white">
+              <ShieldCheck size={24} />
             </div>
-            <h3 className="font-black uppercase text-xs tracking-widest text-slate-900">Admin Archive Report</h3>
+            <div>
+              <h3 className="text-white font-black text-xs uppercase tracking-[0.2em]">Verified Terminal</h3>
+              <p className="text-emerald-400 text-[9px] font-bold uppercase tracking-widest">Document Authenticated</p>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <button 
-              onClick={downloadCSV}
-              className="bg-white border border-slate-200 text-slate-600 px-4 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center gap-2 hover:bg-slate-100 transition-all"
-            >
-              <Package size={14} /> CSV
+          <div className="flex gap-3">
+            <button onClick={handlePrint} className="bg-emerald-500 hover:bg-emerald-400 text-white px-8 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center gap-2 transition-all active:scale-95">
+              <Printer size={16} /> Print / Save as PDF
             </button>
-            <button 
-              onClick={() => window.print()}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center gap-2 shadow-lg transition-all"
-            >
-              <Printer size={14} /> WhatsApp PDF
-            </button>
-            <button onClick={onClose} className="p-3 bg-slate-200 text-slate-600 rounded-2xl hover:bg-red-100 hover:text-red-600 transition-all">
+            <button onClick={onClose} className="p-3 bg-slate-800 text-slate-400 rounded-2xl hover:bg-red-500 hover:text-white transition-all">
               <X size={20} />
             </button>
           </div>
         </div>
 
-        {/* THE ACTUAL REPORT CONTENT */}
-        <div className="p-10 overflow-y-auto print:overflow-visible" id="printable-report">
-          {/* LOGO & HEADER */}
-          <div className="flex justify-between items-start mb-10 border-b-4 border-slate-900 pb-8">
+        {/* PRINTABLE AREA */}
+        <div className="p-16 overflow-y-auto print:overflow-visible print:p-8">
+          {/* HEADER */}
+          <div className="flex justify-between items-start mb-12">
             <div>
-              <h1 className="text-3xl font-black italic tracking-tighter text-slate-900 leading-none">
-                KENSTAR <span className="text-blue-600">OPS</span>
-              </h1>
-              <p className="text-[10px] font-bold uppercase text-slate-500 tracking-[0.3em] mt-1">Verified Attendance Log</p>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="h-10 w-10 bg-slate-900 rounded-xl flex items-center justify-center text-white font-black text-2xl italic">K</div>
+                <h1 className="text-4xl font-black italic tracking-tighter text-slate-900 uppercase">
+                  Kenstar <span className="text-emerald-600">Ops</span>
+                </h1>
+              </div>
+              <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.4em]">Payroll Terminal</p>
             </div>
             <div className="text-right">
-              <p className="font-black uppercase text-xs text-slate-900">Attendance Archive</p>
-              <p className="text-[9px] font-bold text-slate-400 uppercase leading-relaxed">Generated: {new Date().toLocaleDateString()}</p>
+              <div className="inline-block px-4 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-[9px] font-black uppercase tracking-widest border border-emerald-100">Official Record</div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">Issued: {new Date().toLocaleDateString('en-GB')}</p>
             </div>
           </div>
 
-          {/* STAFF INFO BOX */}
-          <div className="bg-slate-50 rounded-3xl p-6 mb-8 border border-slate-100 flex justify-between items-center">
-            <div>
-              <p className="text-[9px] font-black text-blue-600 uppercase mb-1">Employee Name</p>
-              <p className="text-xl font-black text-slate-900 uppercase">{staffName}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-[9px] font-black text-blue-600 uppercase mb-1">Staff ID</p>
-              <p className="text-xl font-black text-slate-900 uppercase">{staffId}</p>
-            </div>
-          </div>
-
-          {/* SUMMARY CARDS */}
-          <div className="grid grid-cols-3 gap-4 mb-8">
-             <div className="bg-green-50 border border-green-100 p-4 rounded-3xl flex flex-col items-center text-center">
-                <CheckCircle2 size={20} className="text-green-600 mb-2" />
-                <p className="text-[8px] font-black text-green-600 uppercase">On Time</p>
-                <p className="text-xl font-black text-slate-900">{onTime}</p>
-             </div>
-             <div className="bg-red-50 border border-red-100 p-4 rounded-3xl flex flex-col items-center text-center">
-                <AlertCircle size={20} className="text-red-600 mb-2" />
-                <p className="text-[8px] font-black text-red-600 uppercase">Lates</p>
-                <p className="text-xl font-black text-slate-900">{lates}</p>
-             </div>
-             <div className="bg-blue-50 border border-blue-100 p-4 rounded-3xl flex flex-col items-center text-center">
-                <Clock size={20} className="text-blue-600 mb-2" />
-                <p className="text-[8px] font-black text-blue-600 uppercase">Overtime</p>
-                <p className="text-xl font-black text-slate-900">{overtimes}</p>
+          {/* TOTAL PAY CARD */}
+          <div className="bg-slate-900 rounded-[2.5rem] p-10 mb-10 text-white relative overflow-hidden">
+             <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
+                <div>
+                   <p className="text-emerald-400 text-[10px] font-black uppercase tracking-[0.3em] mb-2">Beneficiary</p>
+                   <h2 className="text-4xl font-black uppercase tracking-tight italic">{staffName}</h2>
+                   <p className="text-white/40 text-[10px] font-bold uppercase tracking-widest mt-1">Employee ID: {staffId}</p>
+                </div>
+                <div className="bg-white/5 backdrop-blur-md p-6 rounded-[2rem] border border-white/10 text-center md:text-right min-w-[200px]">
+                   <p className="text-emerald-400 text-[9px] font-black uppercase tracking-[0.2em] mb-1">{getReportTitle()}</p>
+                   <p className="text-4xl font-black italic tracking-tighter text-white">
+                     <span className="text-lg mr-1 text-white/30 font-normal">Ksh</span>{Number(totalPay || 0).toLocaleString()}
+                   </p>
+                </div>
              </div>
           </div>
 
           {/* TABLE */}
-          <table className="w-full">
-            <thead>
-              <tr className="text-left border-b-2 border-slate-100">
-                <th className="py-4 text-[10px] font-black uppercase text-slate-400">Date</th>
-                <th className="py-4 text-[10px] font-black uppercase text-slate-400 text-center">Status</th>
-                <th className="py-4 text-[10px] font-black uppercase text-slate-400 text-right">In / Out</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {records.map((r: any, i: number) => (
-                <tr key={i} className="group">
-                  <td className="py-4 text-xs font-bold text-slate-700">
-                    {new Date(r.Date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                  </td>
-                  <td className="py-4 text-center">
-                    <span className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase ${
-                      r.status === 'On Time' ? 'bg-green-100 text-green-700' : 
-                      r.status === 'Late' ? 'bg-red-100 text-red-700' : 
-                      'bg-blue-100 text-blue-700'
-                    }`}>
-                      {r.status}
-                    </span>
-                  </td>
-                  <td className="py-4 text-right text-xs font-black text-slate-900 font-mono">
-                    {r["Time In"] || "--:--"} / {r["Time Out"] || "--:--"}
-                  </td>
+          <div className="space-y-6">
+            <h4 className="text-[11px] font-black uppercase text-slate-900 tracking-widest border-b-2 border-slate-100 pb-3">Session Activity</h4>
+            <table className="w-full border-separate border-spacing-y-2">
+              <thead>
+                <tr className="text-left text-[9px] font-black uppercase text-slate-400 tracking-widest">
+                  <th className="px-4 pb-2">Date</th>
+                  <th className="px-4 pb-2">Log</th>
+                  <th className="px-4 pb-2 text-right">Earned</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {records.map((r: any, i: number) => (
+                  <tr key={i} className="bg-slate-50/80">
+                    <td className="px-4 py-4 rounded-l-2xl border-y border-l border-slate-100">
+                      <p className="text-xs font-black text-slate-900 uppercase">{r.Date}</p>
+                    </td>
+                    <td className="px-4 py-4 border-y border-slate-100">
+                       <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
+                          <span>{r["Time In"] || '--:--'}</span>
+                          <span className="text-slate-300">→</span>
+                          <span>{r["Time Out"] || '--:--'}</span>
+                       </div>
+                    </td>
+                    <td className="px-4 py-4 rounded-r-2xl text-right border-y border-r border-slate-100">
+                      <p className="text-xs font-black text-emerald-700 italic">
+                        {Number(r.earned || 0).toLocaleString()}
+                      </p>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           {/* FOOTER */}
-          <div className="mt-12 pt-8 border-t border-dashed border-slate-200 text-center">
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest italic leading-relaxed">
-              Strict 7AM/8AM Shift Enforcement.<br/>
-              System Powered by KenstarOps ERP v3.0
-            </p>
+          <div className="mt-16 flex justify-between items-end border-t border-slate-200 pt-8">
+             <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ref: KS-SYSTEM-{staffId}</p>
+             </div>
+             <div className="text-right">
+                <p className="text-[11px] font-black uppercase text-slate-900 italic tracking-tighter">Kenstar Uniforms Ltd</p>
+                <p className="text-[8px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md inline-block uppercase mt-1">Verified Digital Transcript</p>
+             </div>
           </div>
         </div>
       </div>

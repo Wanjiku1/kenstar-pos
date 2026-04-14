@@ -131,7 +131,7 @@ export default function AdminDashboard() {
         <aside className="w-72 bg-slate-900 text-white flex flex-col shrink-0 shadow-2xl">
           <div className="p-8">
             <h1 className="text-2xl font-black tracking-tighter italic leading-none">KENSTAR <span className="text-[#007a43]">HQ</span></h1>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.3em] mt-1">Master Controller</p>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.3em] mt-1">Kenstar Admin Command Centre</p>
           </div>
 
           <nav className="flex-1 px-4 space-y-1 overflow-y-auto">

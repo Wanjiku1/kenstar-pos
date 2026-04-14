@@ -33,6 +33,7 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
     if (!confirmPay) return;
 
     try {
+      // 1. Archive the total amount in history
       const { error: histError } = await supabase.from('payout_history').insert([{
         "Employee Id": item["Employee Id"],
         "Employee Name": item["Employee Name"],
@@ -44,6 +45,7 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
 
       if (histError) throw histError;
 
+      // 2. Mark ALL unpaid records for this specific employee as PAID
       const { error: attError } = await supabase
         .from('attendance')
         .update({ "Is Paid": true })
@@ -102,25 +104,41 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
   );
 
   const payrollList = data || [];
+  
+  // --- ENTERPRISE GRADE FLEXIBLE FILTER ---
   const filteredData = payrollList.filter(item => {
-    if (view === 'Sunday') return item.is_sunday_today === true; 
-    return item["Payment Cycle"] === view;
+    // Rule 1: Always include if it is strictly part of the current view
+    if (view === 'Sunday') return item.is_sunday_today === true;
+    if (item["Payment Cycle"] === view) return true;
+
+    // Rule 2: Flexibility - Include any record that is UNPAID 
+    // This ensures past week/month debt shows up even if the "Cycle" changed
+    return item["Is Paid"] === false;
   });
 
-  // --- NEW GROUPING LOGIC TO MERGE DUPLICATE STAFF ENTRIES ---
+  // --- OMNI-GROUPING ENGINE ---
   const groupedData = filteredData.reduce((acc: any[], current: any) => {
-    const name = current["Employee Name"];
-    const existing = acc.find(item => item["Employee Name"] === name);
+    const staffId = current["Employee Id"];
+    const existing = acc.find(item => item["Employee Id"] === staffId);
+
+    // Map DB columns to Numbers to ensure precision
+    const dailyAmount = Number(current["Daily Pay"]) || 0;
+    const dailyHours = Number(current["Total Hours"]) || 0;
 
     if (existing) {
-      existing.total_due += (current.total_due || 0);
-      existing.total_hours += (current.total_hours || 0);
+      // Aggregate debt across all past dates
+      existing.total_due = Number(existing.total_due) + dailyAmount;
+      existing.total_hours = Number(existing.total_hours) + dailyHours;
     } else {
-      acc.push({ ...current });
+      // Initialize the entry for this employee
+      acc.push({ 
+        ...current,
+        total_due: dailyAmount,
+        total_hours: dailyHours
+      });
     }
     return acc;
   }, []);
-  // -----------------------------------------------------------
 
   return (
     <div className="relative z-50 space-y-6 p-4">
@@ -195,7 +213,8 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
           <div className="bg-blue-600 p-6 rounded-[2rem] text-white shadow-xl max-w-sm">
             <p className="text-[10px] font-black uppercase opacity-80">{view} Total Due</p>
             <h3 className="text-3xl font-black italic">
-              KSh {groupedData.reduce((acc, curr) => acc + (curr.total_due || 0), 0).toLocaleString()}
+              {/* SUMMING THE GROUPED TOTALS FOR ACCURACY */}
+              KSh {groupedData.reduce((acc, curr) => acc + (Number(curr.total_due) || 0), 0).toLocaleString()}
             </h3>
           </div>
 
@@ -216,14 +235,21 @@ export const PayoutHub = ({ data, onRefresh }: { data: any[], onRefresh?: () => 
                   <tr key={i} className="hover:bg-slate-50/50">
                     <td className="p-6">
                       <div className="font-black text-slate-800 uppercase text-sm">{item["Employee Name"]}</div>
-                      <div className="text-[9px] text-slate-400 font-bold uppercase">{item["Shop"]} • {item["Roles"]}</div>
+                      <div className="text-[9px] text-slate-400 font-bold uppercase">
+                        {item["Shop"]} • {item["Roles"] || "Staff"}
+                      </div>
                     </td>
-                    <td className="p-6 text-center font-bold text-slate-600">{item.total_hours?.toFixed(1)}h</td>
+                    <td className="p-6 text-center font-bold text-slate-600">
+                      {Number(item.total_hours || 0).toFixed(1)}h
+                    </td>
                     <td className="p-6 text-right font-black text-slate-900 text-lg">
-                      KSh {item.total_due?.toLocaleString()}
+                      KSh {Number(item.total_due || 0).toLocaleString()}
                     </td>
                     <td className="p-6 text-right">
-                      <button onClick={() => handleMarkAsPaid(item)} className="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-all shadow-sm">
+                      <button 
+                        onClick={() => handleMarkAsPaid(item)} 
+                        className="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-all shadow-sm"
+                      >
                         <CheckCircle size={18}/>
                       </button>
                     </td>
