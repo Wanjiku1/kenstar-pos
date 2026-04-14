@@ -28,7 +28,6 @@ export default function KenstarPOS() {
 
   useEffect(() => {
     const loadData = async () => {
-      // Updated select to pull from your product_variants schema
       const { data: prods } = await supabase.from('product_variants').select('*, products(name)');
       const { data: inv } = await supabase.from('material_inventory').select('*');
       if (prods) setItems(prods);
@@ -39,14 +38,7 @@ export default function KenstarPOS() {
 
   const addToCart = (item: any) => {
     if ((item.stock_quantity || 0) <= 0) return toast.error("Item out of stock");
-    
-    setCart([...cart, { 
-      ...item, 
-      cartId: Date.now(), 
-      quantity: 1,
-      originalPrice: item.price,
-      finalPrice: item.price 
-    }]);
+    setCart([...cart, { ...item, cartId: Date.now(), quantity: 1, originalPrice: item.price, finalPrice: item.price }]);
   };
 
   const addCustomItem = () => {
@@ -55,11 +47,7 @@ export default function KenstarPOS() {
     setCart([...cart, { 
       cartId: Date.now(), 
       products: { name: `[CUSTOM] ${customName}`, school_name: "General" }, 
-      price: price, 
-      originalPrice: price,
-      finalPrice: price,
-      size: customSize || 'N/A', 
-      quantity: 1 
+      price: price, originalPrice: price, finalPrice: price, size: customSize || 'N/A', quantity: 1 
     }]);
     setCustomName(''); setCustomPrice(''); setCustomSize('');
     toast.success("Custom item added");
@@ -69,10 +57,34 @@ export default function KenstarPOS() {
   const total = subtotal - discount;
   const change = (parseFloat(amountPaid) || 0) - total;
 
+  // UPDATED MPESA TRIGGER
   const triggerMpesaPush = async () => {
     if (!customerPhone) return toast.error("Enter customer phone number");
-    toast.loading("Sending M-Pesa SDK Push...");
-    setTimeout(() => toast.success("STK Push sent to customer device"), 2000);
+    
+    const formattedPhone = customerPhone.startsWith('0') 
+      ? `254${customerPhone.slice(1)}` 
+      : customerPhone;
+
+    const toastId = toast.loading("Sending M-Pesa SDK Push...");
+
+    try {
+      const res = await fetch('/api/stkpush', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: total, phone: formattedPhone })
+      });
+
+      const data = await res.json();
+
+      if (data.ResponseCode === "0") {
+        toast.success("STK Push sent! Enter PIN on your phone", { id: toastId });
+        console.log("CheckoutID for tracking:", data.CheckoutRequestID);
+      } else {
+        toast.error(data.CustomerMessage || "Push failed", { id: toastId });
+      }
+    } catch (err) {
+      toast.error("Connection error. Check Vercel logs.", { id: toastId });
+    }
   };
 
   const handleCompleteTransaction = async () => {
@@ -82,20 +94,12 @@ export default function KenstarPOS() {
       payment_method: paymentMode,
       amount_paid: paymentMode === 'mpesa' ? total : (amountPaid || total),
       change: paymentMode === 'cash' ? (change > 0 ? change : 0) : 0,
-      discount: discount // Pass the discount explicitly
+      discount: discount
     };
 
-    // Keep items at original price for receipt clarity
-    const cartForReceipt = cart.map(item => ({
-      ...item,
-      finalPrice: item.price 
-    }));
-
     try {
-      // 1. Print Receipt
-      printReceipt(saleData, cartForReceipt, total, "Admin");
+      printReceipt(saleData, cart, total, "Admin");
 
-      // 2. Update Database Inventory
       for (const cartItem of cart) {
         if (cartItem.id) {
           await supabase
@@ -111,10 +115,8 @@ export default function KenstarPOS() {
       setAmountPaid('');
       setDiscount(0);
       
-      // Reload items to reflect new stock levels
       const { data: prods } = await supabase.from('product_variants').select('*, products(name)');
       if (prods) setItems(prods);
-
     } catch (error) {
       toast.error("Transaction failed");
     }
@@ -122,19 +124,10 @@ export default function KenstarPOS() {
 
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
-      
-      {/* SIDE NAVIGATION */}
       <aside className="w-20 bg-white border-r border-slate-200 flex flex-col items-center py-8 gap-8">
         <div className="p-3 bg-emerald-600 rounded-2xl text-white shadow-lg shadow-emerald-200"><ShoppingCart size={24}/></div>
-        <button 
-          onClick={() => setShowMaterialCheck(true)}
-          className="p-3 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all"
-        >
-          <Box size={24}/>
-        </button>
-        <button className="p-3 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all">
-          <Settings size={24}/>
-        </button>
+        <button onClick={() => setShowMaterialCheck(true)} className="p-3 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all"><Box size={24}/></button>
+        <button className="p-3 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all"><Settings size={24}/></button>
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0">
@@ -142,21 +135,16 @@ export default function KenstarPOS() {
           <h1 className="text-xl font-black tracking-tighter">KENSTAR <span className="text-emerald-600 italic">RETAIL</span></h1>
           <div className="relative w-96">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-            <input 
-              placeholder="Search products or schools..." 
-              className="w-full bg-slate-100 border-none rounded-2xl pl-12 pr-4 py-3 text-sm focus:ring-2 ring-emerald-500 outline-none transition-all"
-              onChange={(e) => setSearch(e.target.value)}
-            />
+            <input placeholder="Search products..." className="w-full bg-slate-100 border-none rounded-2xl pl-12 pr-4 py-3 text-sm focus:ring-2 ring-emerald-500 outline-none transition-all" onChange={(e) => setSearch(e.target.value)} />
           </div>
         </header>
 
         <div className="flex-1 flex p-8 gap-8 overflow-hidden">
           <div className="flex-[1.5] flex flex-col gap-6 overflow-hidden">
-            {/* QUICK ADD FORM */}
             <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm flex gap-4">
-                <input placeholder="Product (e.g. Blazer)" className="flex-1 bg-slate-50 border-none rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 ring-emerald-500" value={customName} onChange={e => setCustomName(e.target.value)} />
-                <input placeholder="Price" type="number" className="w-32 bg-slate-50 border-none rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 ring-emerald-500" value={customPrice} onChange={e => setCustomPrice(e.target.value)} />
-                <input placeholder="Size" className="w-24 bg-slate-50 border-none rounded-xl px-4 py-3 text-xs outline-none focus:ring-1 ring-emerald-500" value={customSize} onChange={e => setCustomSize(e.target.value)} />
+                <input placeholder="Product" className="flex-1 bg-slate-50 border-none rounded-xl px-4 py-3 text-xs outline-none" value={customName} onChange={e => setCustomName(e.target.value)} />
+                <input placeholder="Price" type="number" className="w-32 bg-slate-50 border-none rounded-xl px-4 py-3 text-xs outline-none" value={customPrice} onChange={e => setCustomPrice(e.target.value)} />
+                <input placeholder="Size" className="w-24 bg-slate-50 border-none rounded-xl px-4 py-3 text-xs outline-none" value={customSize} onChange={e => setCustomSize(e.target.value)} />
                 <button onClick={addCustomItem} className="bg-slate-900 text-white px-6 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 transition-all">Add Custom</button>
             </div>
 
@@ -173,10 +161,7 @@ export default function KenstarPOS() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {items.filter(i => 
-                        i.products?.name.toLowerCase().includes(search.toLowerCase()) || 
-                        (i.school_name || "").toLowerCase().includes(search.toLowerCase())
-                    ).map(item => (
+                    {items.filter(i => i.products?.name.toLowerCase().includes(search.toLowerCase()) || (i.school_name || "").toLowerCase().includes(search.toLowerCase())).map(item => (
                       <tr key={item.id} className="hover:bg-slate-50 group transition-colors">
                         <td className="p-6">
                             <p className="font-bold text-slate-800 text-sm uppercase">{item.products?.name}</p>
@@ -184,21 +169,13 @@ export default function KenstarPOS() {
                         </td>
                         <td className="p-6"><span className="text-xs font-bold text-slate-500 uppercase">SZ {item.size}</span></td>
                         <td className="p-6 text-center">
-                          <span className={`text-[10px] font-black px-3 py-1 rounded-full ${
-                            (item.stock_quantity || 0) <= 5 
-                              ? 'bg-red-50 text-red-600' 
-                              : 'bg-emerald-50 text-emerald-600'
-                          }`}>
+                          <span className={`text-[10px] font-black px-3 py-1 rounded-full ${(item.stock_quantity || 0) <= 5 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`}>
                             {item.stock_quantity || 0} left
                           </span>
                         </td>
                         <td className="p-6 font-black text-emerald-600 text-sm">KES {item.price.toLocaleString()}</td>
                         <td className="p-6 text-right pr-10">
-                          <button 
-                            onClick={() => addToCart(item)} 
-                            disabled={(item.stock_quantity || 0) <= 0}
-                            className="p-3 bg-white border border-slate-200 text-slate-900 rounded-xl hover:bg-emerald-600 hover:text-white transition-all shadow-sm disabled:opacity-30"
-                          >
+                          <button onClick={() => addToCart(item)} disabled={(item.stock_quantity || 0) <= 0} className="p-3 bg-white border border-slate-200 text-slate-900 rounded-xl hover:bg-emerald-600 hover:text-white transition-all shadow-sm disabled:opacity-30">
                             <Plus size={16}/>
                           </button>
                         </td>
@@ -210,7 +187,6 @@ export default function KenstarPOS() {
             </div>
           </div>
 
-          {/* CHECKOUT SIDEBAR */}
           <div className="w-[420px] bg-white border border-slate-200 rounded-[3rem] shadow-xl flex flex-col overflow-hidden">
             <div className="p-10 flex-1 overflow-y-auto">
               <h3 className="text-xl font-black uppercase italic tracking-tighter mb-8">Cart <span className="text-xs font-normal text-slate-400 ml-2">{cart.length} items</span></h3>
@@ -231,7 +207,7 @@ export default function KenstarPOS() {
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-2 text-orange-600">
                   <Percent size={14}/>
-                  <span className="text-[10px] font-black uppercase tracking-widest italic">Bargain</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest italic">Discount</span>
                 </div>
                 <input className="w-24 bg-white border border-slate-200 rounded-lg px-3 py-2 text-right font-black text-orange-600 outline-none" type="number" onChange={e => setDiscount(parseFloat(e.target.value) || 0)} />
               </div>
@@ -239,11 +215,7 @@ export default function KenstarPOS() {
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Total Due</p>
                  <p className="text-4xl font-black text-slate-900 italic tracking-tighter">KES {total.toLocaleString()}</p>
               </div>
-              <button 
-                onClick={() => setShowPayModal(true)} 
-                disabled={cart.length === 0}
-                className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase text-xs tracking-widest hover:bg-emerald-600 transition-all disabled:opacity-50"
-              >
+              <button onClick={() => setShowPayModal(true)} disabled={cart.length === 0} className="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black uppercase text-xs tracking-widest hover:bg-emerald-600 transition-all disabled:opacity-50">
                 Collect Payment
               </button>
             </div>
@@ -289,11 +261,7 @@ export default function KenstarPOS() {
                     { id: 'mpesa', icon: Smartphone, label: 'M-Pesa' },
                     { id: 'card', icon: CreditCard, label: 'Card' }
                  ].map(mode => (
-                    <button 
-                        key={mode.id}
-                        onClick={() => setPaymentMode(mode.id as any)}
-                        className={`p-6 rounded-[2.5rem] border flex flex-col items-center gap-3 transition-all ${paymentMode === mode.id ? 'bg-emerald-600 border-emerald-600 text-white shadow-xl scale-105' : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-emerald-200'}`}
-                    >
+                    <button key={mode.id} onClick={() => setPaymentMode(mode.id as any)} className={`p-6 rounded-[2.5rem] border flex flex-col items-center gap-3 transition-all ${paymentMode === mode.id ? 'bg-emerald-600 border-emerald-600 text-white shadow-xl scale-105' : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-emerald-200'}`}>
                         <mode.icon size={24}/>
                         <span className="text-[10px] font-black uppercase">{mode.label}</span>
                     </button>
@@ -309,24 +277,13 @@ export default function KenstarPOS() {
                  {paymentMode === 'mpesa' ? (
                     <div className="space-y-4">
                         <label className="text-[10px] font-black text-slate-400 uppercase block mb-2 tracking-widest">Customer Phone</label>
-                        <input 
-                            placeholder="2547XXXXXXXX" 
-                            className="w-full bg-slate-100 p-6 rounded-3xl font-black text-2xl text-center outline-none ring-2 ring-emerald-500/20"
-                            value={customerPhone}
-                            onChange={e => setCustomerPhone(e.target.value)}
-                        />
+                        <input placeholder="2547XXXXXXXX" className="w-full bg-slate-100 p-6 rounded-3xl font-black text-2xl text-center outline-none ring-2 ring-emerald-500/20" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
                         <button onClick={triggerMpesaPush} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg">Send STK Push</button>
                     </div>
                  ) : (
                     <div className="space-y-4">
                         <label className="text-[10px] font-black text-slate-400 uppercase block mb-2 tracking-widest">Amount Tendered</label>
-                        <input 
-                            autoFocus
-                            className="w-full bg-slate-100 p-6 rounded-3xl font-black text-4xl text-center outline-none ring-2 ring-emerald-500/20" 
-                            type="number" 
-                            value={amountPaid} 
-                            onChange={e => setAmountPaid(e.target.value)} 
-                        />
+                        <input autoFocus className="w-full bg-slate-100 p-6 rounded-3xl font-black text-4xl text-center outline-none ring-2 ring-emerald-500/20" type="number" value={amountPaid} onChange={e => setAmountPaid(e.target.value)} />
                         <div className="flex justify-between items-center p-6 bg-slate-50 rounded-3xl border border-slate-100">
                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Change Due</span>
                             <span className={`text-2xl font-black ${change >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>KES {change.toLocaleString()}</span>
@@ -335,10 +292,7 @@ export default function KenstarPOS() {
                  )}
               </div>
 
-              <button 
-                onClick={handleCompleteTransaction}
-                className="w-full bg-slate-900 text-white h-24 rounded-[3rem] font-black uppercase tracking-[0.3em] text-xs shadow-2xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-4"
-              >
+              <button onClick={handleCompleteTransaction} className="w-full bg-slate-900 text-white h-24 rounded-[3rem] font-black uppercase tracking-[0.3em] text-xs shadow-2xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-4">
                  <Printer size={18}/> Record & Print Receipt
               </button>
            </div>

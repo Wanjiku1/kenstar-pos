@@ -1,29 +1,33 @@
 import { NextResponse } from 'next/server';
-import { getAccessToken } from '@/lib/mpesa'; // The function we built in Step 3
+import { getAccessToken } from '@/lib/mpesa';
 
 export async function POST(req: Request) {
   try {
     const { phone, amount } = await req.json();
     const token = await getAccessToken();
     
-    // Format timestamp: YYYYMMDDHHMMSS
+    // 1. Format timestamp: YYYYMMDDHHMMSS
     const timestamp = new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
     
-    // Generate Password: base64(shortcode + passkey + timestamp)
+    // 2. Generate Password: base64(shortcode + passkey + timestamp)
     const password = Buffer.from(
       `${process.env.MPESA_SHORTCODE}${process.env.MPESA_PASSKEY}${timestamp}`
     ).toString("base64");
+
+    // 3. Dynamic Callback URL for Vercel
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://your-vercel-domain.vercel.app";
+    const callbackUrl = `${baseUrl}/api/callback`;
 
     const payload = {
       BusinessShortCode: process.env.MPESA_SHORTCODE,
       Password: password,
       Timestamp: timestamp,
       TransactionType: "CustomerPayBillOnline",
-      Amount: amount,
+      Amount: Math.round(amount), // M-Pesa requires integers
       PartyA: phone, // Must be 2547XXXXXXXX
       PartyB: process.env.MPESA_SHORTCODE,
       PhoneNumber: phone,
-      CallBackURL: "https://your-domain.com/api/callback", // We will build this next
+      CallBackURL: callbackUrl,
       AccountReference: "KenstarOps",
       TransactionDesc: "Uniform Payment",
     };
@@ -41,6 +45,10 @@ export async function POST(req: Request) {
     );
 
     const data = await response.json();
+    
+    // Log the CheckoutRequestID for Vercel tracking
+    console.log("STK Push Initiated. ID:", data.CheckoutRequestID);
+
     return NextResponse.json(data);
   } catch (error) {
     console.error("STK Push Error:", error);
