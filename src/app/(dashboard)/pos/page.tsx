@@ -21,6 +21,7 @@ export default function KenstarPOS() {
   const [amountPaid, setAmountPaid] = useState('');
   const [discount, setDiscount] = useState(0);
   const [inventory, setInventory] = useState<any[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
   
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState('');
@@ -38,7 +39,18 @@ export default function KenstarPOS() {
 
   const addToCart = (item: any) => {
     if ((item.stock_quantity || 0) <= 0) return toast.error("Item out of stock");
-    setCart([...cart, { ...item, cartId: Date.now(), quantity: 1, originalPrice: item.price, finalPrice: item.price }]);
+    const existingIndex = cart.findIndex(i => i.id === item.id && item.id !== undefined);
+    
+    if (existingIndex > -1) {
+      const newCart = [...cart];
+      if (newCart[existingIndex].quantity >= item.stock_quantity) {
+        return toast.error("Maximum stock reached");
+      }
+      newCart[existingIndex].quantity += 1;
+      setCart(newCart);
+    } else {
+      setCart([...cart, { ...item, cartId: Date.now(), quantity: 1, originalPrice: item.price, finalPrice: item.price }]);
+    }
   };
 
   const addCustomItem = () => {
@@ -57,15 +69,70 @@ export default function KenstarPOS() {
   const total = subtotal - discount;
   const change = (parseFloat(amountPaid) || 0) - total;
 
-  // UPDATED MPESA TRIGGER
+  // --- NEW: AUTOMATIC SUCCESS HANDLER ---
+  const finalizeTransaction = async (confirmedSaleData: any) => {
+    try {
+      // 1. Deduct Stock from DB
+      for (const cartItem of cart) {
+        if (cartItem.id) {
+          const newStock = Math.max(0, (cartItem.stock_quantity || 0) - cartItem.quantity);
+          await supabase
+            .from('product_variants')
+            .update({ stock_quantity: newStock })
+            .eq('id', cartItem.id);
+        }
+      }
+
+      // 2. Print Receipt
+      printReceipt(confirmedSaleData, cart, total, "Manager");
+
+      // 3. Clear State
+      toast.success("Transaction Completed Successfully");
+      setCart([]);
+      setShowPayModal(false);
+      setAmountPaid('');
+      setDiscount(0);
+      setCustomerPhone('');
+      setIsProcessing(false);
+      
+      // Refresh local items
+      const { data: prods } = await supabase.from('product_variants').select('*, products(name)');
+      if (prods) setItems(prods);
+    } catch (error) {
+      toast.error("Stock update failed, but payment was received.");
+      setIsProcessing(false);
+    }
+  };
+
+  // --- NEW: POLLING LOGIC ---
+  const startPolling = (saleId: string, checkoutID: string) => {
+    const intervalId = setInterval(async () => {
+      const { data: saleRow } = await supabase
+        .from('sales')
+        .select('*')
+        .eq('id', saleId)
+        .single();
+
+      // If the payment_ref is no longer the CheckoutID, it means Callback updated it to the Receipt Number
+      if (saleRow && saleRow.payment_ref !== checkoutID) {
+        clearInterval(intervalId);
+        finalizeTransaction(saleRow);
+      }
+    }, 3000);
+
+    // Stop polling after 2 minutes to prevent infinite loops
+    setTimeout(() => clearInterval(intervalId), 120000);
+  };
+
   const triggerMpesaPush = async () => {
     if (!customerPhone) return toast.error("Enter customer phone number");
+    setIsProcessing(true);
     
     const formattedPhone = customerPhone.startsWith('0') 
       ? `254${customerPhone.slice(1)}` 
       : customerPhone;
 
-    const toastId = toast.loading("Sending M-Pesa SDK Push...");
+    const toastId = toast.loading("Initiating M-Pesa STK Push...");
 
     try {
       const res = await fetch('/api/stkpush', {
@@ -77,48 +144,64 @@ export default function KenstarPOS() {
       const data = await res.json();
 
       if (data.ResponseCode === "0") {
-        toast.success("STK Push sent! Enter PIN on your phone", { id: toastId });
-        console.log("CheckoutID for tracking:", data.CheckoutRequestID);
+        toast.success("STK Push sent! Please enter your PIN", { id: toastId });
+        
+        // INSERT ANCHOR RECORD
+        const { data: newSale, error } = await supabase
+          .from('sales')
+          .insert([{
+            payment_method: 'mpesa',
+            total_amount: total,
+            payment_ref: data.CheckoutRequestID, // Link for callback
+            collection_status: 'ready',
+            discount_amount: discount,
+            original_total: subtotal
+          }])
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        // START WATCHING FOR SUCCESS
+        startPolling(newSale.id, data.CheckoutRequestID);
+
       } else {
-        toast.error(data.CustomerMessage || "Push failed", { id: toastId });
+        setIsProcessing(false);
+        toast.error(data.CustomerMessage || "Push failed. Try again.", { id: toastId });
       }
     } catch (err) {
-      toast.error("Connection error. Check Vercel logs.", { id: toastId });
+      setIsProcessing(false);
+      toast.error("Network error. Verify API status.", { id: toastId });
     }
   };
 
   const handleCompleteTransaction = async () => {
-    if (paymentMode === 'cash' && change < 0) return toast.error("Insufficient Cash Paid");
+    if (paymentMode === 'mpesa') {
+        return toast.info("Use 'Send STK Push' for M-Pesa payments.");
+    }
 
-    const saleData = {
-      payment_method: paymentMode,
-      amount_paid: paymentMode === 'mpesa' ? total : (amountPaid || total),
-      change: paymentMode === 'cash' ? (change > 0 ? change : 0) : 0,
-      discount: discount
-    };
+    if (paymentMode === 'cash' && change < 0) return toast.error("Insufficient Cash Paid");
+    setIsProcessing(true);
 
     try {
-      printReceipt(saleData, cart, total, "Admin");
+      const { data: cashSale, error } = await supabase
+        .from('sales')
+        .insert([{
+          payment_method: 'cash',
+          total_amount: total,
+          payment_ref: `CASH_${Date.now()}`,
+          collection_status: 'ready',
+          discount_amount: discount,
+          original_total: subtotal
+        }])
+        .select()
+        .single();
 
-      for (const cartItem of cart) {
-        if (cartItem.id) {
-          await supabase
-            .from('product_variants')
-            .update({ stock_quantity: Math.max(0, (cartItem.stock_quantity || 1) - 1) })
-            .eq('id', cartItem.id);
-        }
-      }
-
-      toast.success("Sale Recorded & Receipt Printed");
-      setCart([]);
-      setShowPayModal(false);
-      setAmountPaid('');
-      setDiscount(0);
-      
-      const { data: prods } = await supabase.from('product_variants').select('*, products(name)');
-      if (prods) setItems(prods);
+      if (error) throw error;
+      finalizeTransaction(cashSale);
     } catch (error) {
-      toast.error("Transaction failed");
+      setIsProcessing(false);
+      toast.error("Database update failed");
     }
   };
 
@@ -135,7 +218,7 @@ export default function KenstarPOS() {
           <h1 className="text-xl font-black tracking-tighter">KENSTAR <span className="text-emerald-600 italic">RETAIL</span></h1>
           <div className="relative w-96">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
-            <input placeholder="Search products..." className="w-full bg-slate-100 border-none rounded-2xl pl-12 pr-4 py-3 text-sm focus:ring-2 ring-emerald-500 outline-none transition-all" onChange={(e) => setSearch(e.target.value)} />
+            <input placeholder="Search products or schools..." className="w-full bg-slate-100 border-none rounded-2xl pl-12 pr-4 py-3 text-sm focus:ring-2 ring-emerald-500 outline-none transition-all" onChange={(e) => setSearch(e.target.value)} />
           </div>
         </header>
 
@@ -189,13 +272,16 @@ export default function KenstarPOS() {
 
           <div className="w-[420px] bg-white border border-slate-200 rounded-[3rem] shadow-xl flex flex-col overflow-hidden">
             <div className="p-10 flex-1 overflow-y-auto">
-              <h3 className="text-xl font-black uppercase italic tracking-tighter mb-8">Cart <span className="text-xs font-normal text-slate-400 ml-2">{cart.length} items</span></h3>
+              <h3 className="text-xl font-black uppercase italic tracking-tighter mb-8">Cart <span className="text-xs font-normal text-slate-400 ml-2">{cart.reduce((sum, item) => sum + item.quantity, 0)} items</span></h3>
               <div className="space-y-3">
                 {cart.map(i => (
                   <div key={i.cartId} className="flex justify-between items-center bg-slate-50 p-5 rounded-2xl border border-slate-100">
                     <div className="truncate pr-4">
-                      <p className="text-[10px] font-black uppercase text-slate-800 truncate">{i.products?.name || i.item_name}</p>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">SZ {i.size} • KES {i.price.toLocaleString()}</p>
+                      <p className="text-[10px] font-black uppercase text-slate-800 truncate">
+                        {i.quantity > 1 && <span className="text-emerald-600 mr-1">{i.quantity}x</span>}
+                        {i.products?.name || i.item_name}
+                      </p>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">SZ {i.size} • KES {(i.price * i.quantity).toLocaleString()}</p>
                     </div>
                     <button onClick={() => setCart(cart.filter(x => x.cartId !== i.cartId))} className="text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
                   </div>
@@ -209,7 +295,7 @@ export default function KenstarPOS() {
                   <Percent size={14}/>
                   <span className="text-[10px] font-black uppercase tracking-widest italic">Discount</span>
                 </div>
-                <input className="w-24 bg-white border border-slate-200 rounded-lg px-3 py-2 text-right font-black text-orange-600 outline-none" type="number" onChange={e => setDiscount(parseFloat(e.target.value) || 0)} />
+                <input className="w-24 bg-white border border-slate-200 rounded-lg px-3 py-2 text-right font-black text-orange-600 outline-none" type="number" value={discount} onChange={e => setDiscount(parseFloat(e.target.value) || 0)} />
               </div>
               <div className="pt-4 border-t border-slate-200 text-right">
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Total Due</p>
@@ -223,7 +309,6 @@ export default function KenstarPOS() {
         </div>
       </main>
 
-      {/* DRAWER: MATERIAL CHECKER */}
       {showMaterialCheck && (
         <div className="fixed inset-0 z-[110] bg-slate-900/20 backdrop-blur-sm" onClick={() => setShowMaterialCheck(false)}>
             <div className="absolute right-0 top-0 h-full w-[450px] bg-white shadow-2xl p-12 border-l border-slate-100" onClick={e => e.stopPropagation()}>
@@ -246,7 +331,6 @@ export default function KenstarPOS() {
         </div>
       )}
 
-      {/* PAYMENT MODAL */}
       {showPayModal && (
         <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6">
            <div className="bg-white w-full max-w-xl rounded-[4rem] p-12 shadow-2xl space-y-10">
@@ -277,8 +361,10 @@ export default function KenstarPOS() {
                  {paymentMode === 'mpesa' ? (
                     <div className="space-y-4">
                         <label className="text-[10px] font-black text-slate-400 uppercase block mb-2 tracking-widest">Customer Phone</label>
-                        <input placeholder="2547XXXXXXXX" className="w-full bg-slate-100 p-6 rounded-3xl font-black text-2xl text-center outline-none ring-2 ring-emerald-500/20" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
-                        <button onClick={triggerMpesaPush} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg">Send STK Push</button>
+                        <input placeholder="07XXXXXXXX" className="w-full bg-slate-100 p-6 rounded-3xl font-black text-2xl text-center outline-none ring-2 ring-emerald-500/20" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
+                        <button onClick={triggerMpesaPush} disabled={isProcessing} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg disabled:opacity-50">
+                          {isProcessing ? "Waiting for Payment..." : "Send STK Push"}
+                        </button>
                     </div>
                  ) : (
                     <div className="space-y-4">
@@ -292,9 +378,11 @@ export default function KenstarPOS() {
                  )}
               </div>
 
-              <button onClick={handleCompleteTransaction} className="w-full bg-slate-900 text-white h-24 rounded-[3rem] font-black uppercase tracking-[0.3em] text-xs shadow-2xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-4">
-                 <Printer size={18}/> Record & Print Receipt
-              </button>
+              {paymentMode !== 'mpesa' && (
+                <button onClick={handleCompleteTransaction} disabled={isProcessing} className="w-full bg-slate-900 text-white h-24 rounded-[3rem] font-black uppercase tracking-[0.3em] text-xs shadow-2xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-4">
+                   <Printer size={18}/> {isProcessing ? "Processing..." : "Record & Print Receipt"}
+                </button>
+              )}
            </div>
         </div>
       )}
