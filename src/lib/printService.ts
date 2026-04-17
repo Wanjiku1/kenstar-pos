@@ -46,23 +46,26 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
           .flex-between { display: flex; justify-content: space-between; }
           .calligraphy { 
             font-family: 'Great Vibes', cursive; 
-            font-size: 22px; 
+            font-size: 20px; 
             color: #222;
-            margin: 10px 0;
+            margin: 5px 0;
           }
+          .logo { width: 70px; height: 70px; object-fit: contain; }
         </style>
       </head>
       <body>
         <div class="center">
-          <img src="${logoUrl}" style="width: 75px; height: 75px; object-fit: contain; margin-bottom: 5px;" />
-          <div class="bold" style="font-size: 16px; letter-spacing: 1px;">KENSTAR UNIFORMS [cite: 19]</div>
-          <div style="font-size: 10px; margin-top: 2px;">UMOJA 1 MARKET, NAIROBI [cite: 20]</div>
-          <div style="font-size: 10px;">STALL 315/314 [cite: 20]</div>
-          <div style="font-size: 11px; font-weight: bold; margin-top: 2px;">TEL: +254 722 876 112 </div>
+          <img src="${logoUrl}" class="logo" />
+          <div class="calligraphy">We are here to help</div>
+          <div class="bold" style="font-size: 16px; letter-spacing: 1px;">KENSTAR UNIFORMS</div>
+          <div style="font-size: 10px; margin-top: 2px;">UMOJA 1 MARKET, NAIROBI STALL 315/314
+         </div>
+          <div style="font-size: 10px;">STALL 315/314</div>
+          <div style="font-size: 11px; font-weight: bold; margin-top: 2px;">TEL: +254 722 876 112 / +254 714 950 573</div>
         </div>
 
         <div class="hr"></div>
-        <div class="center bold" style="font-size: 13px; letter-spacing: 2px;">OFFICIAL RECEIPT [cite: 4]</div>
+        <div class="center bold" style="font-size: 13px; letter-spacing: 2px;">OFFICIAL RECEIPT</div>
         <div class="hr"></div>
 
         <div style="margin-bottom: 10px;">
@@ -72,7 +75,7 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
         <div class="hr"></div>
 
         <div style="font-size: 13px;">
-          <div class="flex-between"><span>Sub Total [cite: 7]</span><span>KES ${subTotal.toLocaleString()}</span></div>
+          <div class="flex-between"><span>Sub Total</span><span>KES ${subTotal.toLocaleString()}</span></div>
           
           ${totalSavings > 0 ? `
           <div class="flex-between" style="font-weight: bold; margin-top: 2px;">
@@ -81,12 +84,12 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
           </div>` : ''}
 
           <div class="flex-between" style="font-size: 18px; font-weight: 900; margin: 10px 0; border-top: 1px solid #000; padding-top: 5px;">
-            <span>TOTAL [cite: 8]</span>
+            <span>TOTAL</span>
             <span>KES ${total.toLocaleString()}</span>
           </div>
           
           <div class="flex-between" style="font-size: 12px;">
-            <span>Paid via ${saleData.payment_method?.toUpperCase()} [cite: 9]</span>
+            <span>Paid via ${saleData.payment_method?.toUpperCase()}</span>
             <span>KES ${tenderedAmount.toLocaleString()}</span>
           </div>
           
@@ -97,28 +100,24 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
             </div>
           ` : `
             <div style="margin-top: 12px; padding: 10px; border: 2px solid #000; text-align: center; background-color: #f9f9f9;">
-              <div style="font-size: 10px; font-weight: bold; text-decoration: underline;">M-PESA TRANSACTION ID </div>
+              <div style="font-size: 10px; font-weight: bold; text-decoration: underline;">M-PESA TRANSACTION ID</div>
               <div style="font-size: 16px; font-weight: 900; letter-spacing: 1.5px; margin-top: 4px;">${saleData.payment_ref}</div>
             </div>
           `}
         </div>
 
-        <div class="center">
-            <div class="calligraphy">We are here to help</div>
-        </div>
-
-        <div class="hr"></div>
+        <div class="hr" style="margin-top: 15px;"></div>
         
         <div class="flex-between" style="font-size: 10px; font-weight: bold;">
-          <span>${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()} [cite: 24]</span>
-          <span>CASHIER: ${cashierName.toUpperCase()} [cite: 16]</span>
+          <span>${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}</span>
+          <span>CASHIER: ${cashierName.toUpperCase()}</span>
         </div>
 
         <div class="center" style="margin-top: 20px;">
-          <div style="font-size: 10px; margin-bottom: 8px;">Sale No: ${saleNumber} [cite: 25]</div>
-          <div class="bold" style="font-size: 11px;">THANK YOU FOR CHOOSING KENSTAR [cite: 26]</div>
+          <div style="font-size: 10px; margin-bottom: 8px;">Sale No: ${saleNumber}</div>
+          <div class="bold" style="font-size: 11px;">THANK YOU FOR CHOOSING KENSTAR</div>
           <div style="font-size: 13px; font-weight: 900; margin-top: 4px; border-top: 1px solid #000; display: inline-block; padding-top: 4px;">
-            KARIBU TENA 
+            KARIBU TENA
           </div>
         </div>
           
