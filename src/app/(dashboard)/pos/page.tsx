@@ -138,7 +138,7 @@ export default function KenstarPOS() {
       discount_amount: discount,
       original_total: subtotal,
       amount_paid: parseFloat(amountPaid),
-      collection_status: 'ready' // Fixed the DB Error
+      collection_status: 'ready'
     }]).select().single();
 
     if (error) {
