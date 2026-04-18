@@ -13,7 +13,6 @@ export async function POST(req: Request) {
       const metadata = result.CallbackMetadata.Item;
       const mpesaReceipt = metadata.find((i: any) => i.Name === "MpesaReceiptNumber")?.Value;
 
-      // Update the sales record so the POS Polling detects the change
       const { error } = await supabase
         .from('sales')
         .update({ 
@@ -26,7 +25,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ ResultCode: 0, ResultDesc: "Success" });
 
     } else {
-      await supabase.from('sales').update({ collection_status: 'failed' }).eq('payment_ref', checkoutID);
+      // Mark as failed so polling stops and manager can retry
+      await supabase.from('sales')
+        .update({ collection_status: 'failed' })
+        .eq('payment_ref', checkoutID);
+        
       return NextResponse.json({ ResultCode: result.ResultCode, ResultDesc: result.ResultDesc });
     }
   } catch (error) {

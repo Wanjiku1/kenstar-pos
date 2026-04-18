@@ -1,11 +1,7 @@
 "use client";
-
 import React, { useState, useEffect } from 'react';
 import { supabase } from "@/lib/supabase";
-import { 
-  ShoppingCart, X, Plus, Trash2, Search, Smartphone, 
-  Banknote, Box, Printer, Settings, Percent 
-} from "lucide-react";
+import { ShoppingCart, X, Plus, Trash2, Search, Smartphone, Banknote, Box, Printer } from "lucide-react";
 import { toast } from 'sonner';
 import { printReceipt } from "@/lib/printService";
 
@@ -22,13 +18,10 @@ export default function KenstarPOS() {
   const [inventory, setInventory] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [pollingStatus, setPollingStatus] = useState<'idle' | 'waiting'>('idle');
-  
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState('');
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
     const { data: prods } = await supabase.from('product_variants').select('*, products(name)');
@@ -55,18 +48,13 @@ export default function KenstarPOS() {
 
   const finalizeTransaction = async (confirmedSaleData: any) => {
     try {
-      // 1. Update Stock
       for (const item of cart) {
         if (item.id) {
           const newStock = Math.max(0, (item.stock_quantity || 0) - item.quantity);
           await supabase.from('product_variants').update({ stock_quantity: newStock }).eq('id', item.id);
         }
       }
-
-      // 2. Print with Real Data
       printReceipt(confirmedSaleData, cart, total, "Manager");
-
-      // 3. UI Cleanup
       toast.success("Transaction Complete");
       setCart([]);
       setShowPayModal(false);
@@ -90,15 +78,27 @@ export default function KenstarPOS() {
         clearInterval(interval);
         finalizeTransaction(data);
       }
+      if (data && data.collection_status === 'failed') {
+        clearInterval(interval);
+        setPollingStatus('idle');
+        setIsProcessing(false);
+        toast.error("M-Pesa payment failed.");
+      }
     }, 3000);
-    setTimeout(() => { clearInterval(interval); if (pollingStatus === 'waiting') setIsProcessing(false); }, 120000);
+    setTimeout(() => { 
+      clearInterval(interval); 
+      if (pollingStatus === 'waiting') {
+        setPollingStatus('idle');
+        setIsProcessing(false);
+        toast.error("Timed out. Please retry.");
+      }
+    }, 120000);
   };
 
   const triggerMpesaPush = async () => {
     if (!customerPhone) return toast.error("Enter phone");
     setIsProcessing(true);
     const toastId = toast.loading("Sending STK Push...");
-    
     try {
       const res = await fetch('/api/stkpush', {
         method: 'POST',
@@ -106,16 +106,15 @@ export default function KenstarPOS() {
         body: JSON.stringify({ amount: total, phone: customerPhone.replace(/^0/, '254') })
       });
       const data = await res.json();
-
       if (data.ResponseCode === "0") {
         const { data: sale, error } = await supabase.from('sales').insert([{
           payment_method: 'mpesa',
           total_amount: total,
           payment_ref: data.CheckoutRequestID,
           discount_amount: discount,
-          original_total: subtotal
+          original_total: subtotal,
+          collection_status: 'pending'
         }]).select().single();
-
         if (error) throw error;
         toast.success("PIN Prompt Sent", { id: toastId });
         startPolling(sale.id, data.CheckoutRequestID);
@@ -125,7 +124,7 @@ export default function KenstarPOS() {
       }
     } catch (e) {
       setIsProcessing(false);
-      toast.error("Error", { id: toastId });
+      toast.error("Error sending push", { id: toastId });
     }
   };
 
@@ -138,16 +137,21 @@ export default function KenstarPOS() {
       payment_ref: `CASH_${Date.now()}`,
       discount_amount: discount,
       original_total: subtotal,
-      amount_paid: parseFloat(amountPaid)
+      amount_paid: parseFloat(amountPaid),
+      collection_status: 'ready' // Fixed the DB Error
     }]).select().single();
 
-    if (error) { toast.error("DB Error"); setIsProcessing(false); return; }
+    if (error) {
+      console.error(error);
+      toast.error("DB Error: " + error.message);
+      setIsProcessing(false);
+      return;
+    }
     finalizeTransaction(sale);
   };
 
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
-      {/* Sidebar */}
       <aside className="w-20 bg-white border-r flex flex-col items-center py-8 gap-8">
         <div className="p-3 bg-emerald-600 rounded-2xl text-white"><ShoppingCart size={24}/></div>
         <button onClick={() => setShowMaterialCheck(true)} className="p-3 text-slate-400 hover:text-emerald-600"><Box size={24}/></button>
@@ -164,7 +168,6 @@ export default function KenstarPOS() {
 
         <div className="flex-1 flex p-8 gap-8 overflow-hidden">
           <div className="flex-[1.5] flex flex-col gap-6 overflow-hidden">
-            {/* Custom Item Row */}
             <div className="bg-white p-6 rounded-[2.5rem] border shadow-sm flex gap-4">
               <input placeholder="Item" className="flex-1 bg-slate-50 rounded-xl px-4 py-3 outline-none" value={customName} onChange={e => setCustomName(e.target.value)} />
               <input placeholder="Price" className="w-32 bg-slate-50 rounded-xl px-4 py-3 outline-none" type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)} />
@@ -175,7 +178,6 @@ export default function KenstarPOS() {
               }} className="bg-slate-900 text-white px-6 rounded-xl font-bold uppercase text-[10px]">Add Custom</button>
             </div>
 
-            {/* Product Table */}
             <div className="bg-white rounded-[2.5rem] border shadow-sm flex-1 overflow-auto">
               <table className="w-full text-left border-collapse">
                 <thead className="sticky top-0 bg-white z-10 border-b">
@@ -204,7 +206,6 @@ export default function KenstarPOS() {
             </div>
           </div>
 
-          {/* Cart Section */}
           <div className="w-[420px] bg-white border rounded-[3rem] shadow-xl flex flex-col overflow-hidden">
             <div className="p-10 flex-1 overflow-y-auto">
               <h3 className="text-xl font-black italic tracking-tighter mb-8 uppercase">Cart</h3>
@@ -235,7 +236,6 @@ export default function KenstarPOS() {
         </div>
       </main>
 
-      {/* Payment Modal */}
       {showPayModal && (
         <div className="fixed inset-0 z-[120] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6">
            <div className="bg-white w-full max-w-xl rounded-[4rem] p-12 shadow-2xl space-y-10">
@@ -253,14 +253,17 @@ export default function KenstarPOS() {
                  {paymentMode === 'mpesa' ? (
                     <div className="space-y-4">
                         {pollingStatus === 'waiting' ? (
-                          <div className="p-10 bg-emerald-50 rounded-3xl border-2 border-dashed border-emerald-200 text-center animate-pulse">
-                            <p className="font-black text-emerald-800">WAITING FOR M-PESA...</p>
-                            <p className="text-xs text-emerald-600 mt-2">Check the phone for the PIN prompt</p>
+                          <div className="space-y-4 text-center">
+                            <div className="p-10 bg-emerald-50 rounded-3xl border-2 border-dashed border-emerald-200 animate-pulse">
+                              <p className="font-black text-emerald-800">WAITING FOR M-PESA...</p>
+                              <p className="text-xs text-emerald-600 mt-2">Check the phone for the PIN prompt</p>
+                            </div>
+                            <button onClick={() => { setPollingStatus('idle'); setIsProcessing(false); }} className="w-full bg-slate-100 text-slate-500 py-3 rounded-2xl font-bold text-[10px] uppercase">Cancel & Retry</button>
                           </div>
                         ) : (
                           <>
                             <input placeholder="07XXXXXXXX" className="w-full bg-slate-100 p-6 rounded-3xl font-black text-2xl text-center outline-none" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
-                            <button onClick={triggerMpesaPush} disabled={isProcessing} className="w-full bg-emerald-600 text-white py-6 rounded-3xl font-black uppercase">Send STK Push</button>
+                            <button onClick={triggerMpesaPush} disabled={isProcessing} className="w-full bg-emerald-600 text-white py-6 rounded-3xl font-black uppercase">{isProcessing ? "Processing..." : "Send STK Push"}</button>
                           </>
                         )}
                     </div>
@@ -279,7 +282,6 @@ export default function KenstarPOS() {
         </div>
       )}
 
-      {/* Material Check Sidebar */}
       {showMaterialCheck && (
         <div className="fixed inset-0 z-[110] bg-slate-900/20 backdrop-blur-sm" onClick={() => setShowMaterialCheck(false)}>
             <div className="absolute right-0 top-0 h-full w-[450px] bg-white shadow-2xl p-12 border-l" onClick={e => e.stopPropagation()}>

@@ -1,9 +1,10 @@
 export const printReceipt = (saleData: any, cart: any[], total: number, cashierName: string = "Admin") => {
   if (typeof window === "undefined") return;
 
+  // Open window immediately to satisfy browser security
   const receiptWindow = window.open('', '_blank', 'width=400,height=800');
   if (!receiptWindow) {
-    alert("Please allow pop-ups to print receipts");
+    alert("Please allow pop-ups to print receipts. Look for the blocked icon in your address bar.");
     return;
   }
 
@@ -34,11 +35,8 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
           @page { size: 80mm auto; margin: 0; }
           body { 
             font-family: 'Courier New', Courier, monospace; 
-            width: 72mm; 
-            padding: 4mm; 
-            margin: 0 auto; 
-            color: #000; 
-            line-height: 1.3;
+            width: 72mm; padding: 4mm; margin: 0 auto; 
+            color: #000; line-height: 1.3;
           }
           .center { text-align: center; }
           .hr { border-top: 1px dashed #000; margin: 8px 0; }
@@ -46,9 +44,7 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
           .flex-between { display: flex; justify-content: space-between; }
           .calligraphy { 
             font-family: 'Great Vibes', cursive; 
-            font-size: 20px; 
-            color: #222;
-            margin: 5px 0;
+            font-size: 20px; color: #222; margin: 5px 0;
           }
           .logo { width: 70px; height: 70px; object-fit: contain; }
         </style>
@@ -58,9 +54,8 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
           <img src="${logoUrl}" class="logo" />
           <div class="calligraphy">We are here to help</div>
           <div class="bold" style="font-size: 16px; letter-spacing: 1px;">KENSTAR UNIFORMS</div>
-          <div style="font-size: 10px; margin-top: 2px;">UMOJA 1 MARKET, NAIROBI STALL 315/314
-         </div>
-          <div style="font-size: 10px;">STALL 315/314</div>
+          <div style="font-size: 10px; margin-top: 2px;">UMOJA 1 MARKET, NAIROBI STALL 315/314</div>
+          <div style="font-size: 10px;">OPP CO-OPERATIVE BANK UMOJA 1</div>
           <div style="font-size: 11px; font-weight: bold; margin-top: 2px;">TEL: +254 722 876 112 / +254 714 950 573</div>
         </div>
 
@@ -68,24 +63,18 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
         <div class="center bold" style="font-size: 13px; letter-spacing: 2px;">OFFICIAL RECEIPT</div>
         <div class="hr"></div>
 
-        <div style="margin-bottom: 10px;">
-          ${itemsHtml}
-        </div>
-
+        <div style="margin-bottom: 10px;">${itemsHtml}</div>
         <div class="hr"></div>
 
         <div style="font-size: 13px;">
           <div class="flex-between"><span>Sub Total</span><span>KES ${subTotal.toLocaleString()}</span></div>
-          
           ${totalSavings > 0 ? `
           <div class="flex-between" style="font-weight: bold; margin-top: 2px;">
-            <span>Discount</span>
-            <span>- KES ${totalSavings.toLocaleString()}</span>
+            <span>Discount</span><span>- KES ${totalSavings.toLocaleString()}</span>
           </div>` : ''}
 
           <div class="flex-between" style="font-size: 18px; font-weight: 900; margin: 10px 0; border-top: 1px solid #000; padding-top: 5px;">
-            <span>TOTAL</span>
-            <span>KES ${total.toLocaleString()}</span>
+            <span>TOTAL</span><span>KES ${total.toLocaleString()}</span>
           </div>
           
           <div class="flex-between" style="font-size: 12px;">
@@ -95,8 +84,7 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
           
           ${isCash ? `
             <div class="flex-between" style="font-weight: bold; font-size: 14px; margin-top: 4px;">
-              <span>CHANGE</span>
-              <span>KES ${changeAmount.toLocaleString()}</span>
+              <span>CHANGE</span><span>KES ${changeAmount.toLocaleString()}</span>
             </div>
           ` : `
             <div style="margin-top: 12px; padding: 10px; border: 2px solid #000; text-align: center; background-color: #f9f9f9;">
