@@ -15,12 +15,17 @@ export async function POST(req: Request) {
 
       const { error } = await supabase
         .from('sales')
-        .update({ payment_ref: mpesaReceipt, collection_status: 'ready' })
+        .update({ 
+          payment_ref: mpesaReceipt,
+          collection_status: 'ready' 
+        })
         .eq('payment_ref', checkoutID);
 
-      if (error) console.error("Callback DB Error:", error.message);
+      if (error) console.error("Callback DB Update Error:", error.message);
       return NextResponse.json({ ResultCode: 0, ResultDesc: "Success" });
+
     } else {
+      // Mark as failed so the POS UI can trigger a retry
       await supabase.from('sales').update({ collection_status: 'failed' }).eq('payment_ref', checkoutID);
       return NextResponse.json({ ResultCode: result.ResultCode, ResultDesc: result.ResultDesc });
     }

@@ -1,7 +1,11 @@
 "use client";
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from "@/lib/supabase";
-import { ShoppingCart, X, Plus, Trash2, Search, Smartphone, Banknote, Box, Printer } from "lucide-react";
+import { 
+  ShoppingCart, X, Plus, Trash2, Search, Smartphone, 
+  Banknote, Box, Printer, Settings, Percent 
+} from "lucide-react";
 import { toast } from 'sonner';
 import { printReceipt } from "@/lib/printService";
 
@@ -18,10 +22,13 @@ export default function KenstarPOS() {
   const [inventory, setInventory] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [pollingStatus, setPollingStatus] = useState<'idle' | 'waiting'>('idle');
+  
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState('');
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => {
+    loadData();
+  }, []);
 
   const loadData = async () => {
     const { data: prods } = await supabase.from('product_variants').select('*, products(name)');
@@ -74,23 +81,28 @@ export default function KenstarPOS() {
     setPollingStatus('waiting');
     const interval = setInterval(async () => {
       const { data } = await supabase.from('sales').select('*').eq('id', saleId).single();
+      
+      // Success check
       if (data && data.payment_ref !== checkoutID) {
         clearInterval(interval);
         finalizeTransaction(data);
       }
+      
+      // Failure check (from callback)
       if (data && data.collection_status === 'failed') {
         clearInterval(interval);
         setPollingStatus('idle');
         setIsProcessing(false);
-        toast.error("M-Pesa payment failed.");
+        toast.error("M-Pesa Payment Failed or Cancelled");
       }
     }, 3000);
+
     setTimeout(() => { 
       clearInterval(interval); 
       if (pollingStatus === 'waiting') {
-        setPollingStatus('idle');
         setIsProcessing(false);
-        toast.error("Timed out. Please retry.");
+        setPollingStatus('idle');
+        toast.error("M-Pesa Polling Timed Out");
       }
     }, 120000);
   };
@@ -99,13 +111,15 @@ export default function KenstarPOS() {
     if (!customerPhone) return toast.error("Enter phone");
     setIsProcessing(true);
     const toastId = toast.loading("Sending STK Push...");
+    
     try {
       const res = await fetch('/api/stkpush', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: total, phone: customerPhone.replace(/^0/, '254') })
+        body: JSON.stringify({ amount: Math.round(total), phone: customerPhone.replace(/^0/, '254') })
       });
       const data = await res.json();
+
       if (data.ResponseCode === "0") {
         const { data: sale, error } = await supabase.from('sales').insert([{
           payment_method: 'mpesa',
@@ -115,6 +129,7 @@ export default function KenstarPOS() {
           original_total: subtotal,
           collection_status: 'pending'
         }]).select().single();
+
         if (error) throw error;
         toast.success("PIN Prompt Sent", { id: toastId });
         startPolling(sale.id, data.CheckoutRequestID);
@@ -124,30 +139,34 @@ export default function KenstarPOS() {
       }
     } catch (e) {
       setIsProcessing(false);
-      toast.error("Error sending push", { id: toastId });
+      toast.error("Error", { id: toastId });
     }
   };
 
   const handleCashSale = async () => {
     if (change < 0) return toast.error("Insufficient cash");
     setIsProcessing(true);
+    
+    // Fix: removed 'amount_paid' if column missing, and added 'collection_status'
     const { data: sale, error } = await supabase.from('sales').insert([{
       payment_method: 'cash',
       total_amount: total,
       payment_ref: `CASH_${Date.now()}`,
       discount_amount: discount,
       original_total: subtotal,
-      amount_paid: parseFloat(amountPaid),
-      collection_status: 'ready'
+      collection_status: 'ready' 
     }]).select().single();
 
-    if (error) {
+    if (error) { 
       console.error(error);
-      toast.error("DB Error: " + error.message);
-      setIsProcessing(false);
-      return;
+      toast.error("DB Error: " + error.message); 
+      setIsProcessing(false); 
+      return; 
     }
-    finalizeTransaction(sale);
+
+    // Attach local data for receipt printing only
+    const saleForReceipt = { ...sale, amount_paid: parseFloat(amountPaid), change: change };
+    finalizeTransaction(saleForReceipt);
   };
 
   return (
@@ -253,17 +272,24 @@ export default function KenstarPOS() {
                  {paymentMode === 'mpesa' ? (
                     <div className="space-y-4">
                         {pollingStatus === 'waiting' ? (
-                          <div className="space-y-4 text-center">
-                            <div className="p-10 bg-emerald-50 rounded-3xl border-2 border-dashed border-emerald-200 animate-pulse">
+                          <div className="space-y-4">
+                            <div className="p-10 bg-emerald-50 rounded-3xl border-2 border-dashed border-emerald-200 text-center animate-pulse">
                               <p className="font-black text-emerald-800">WAITING FOR M-PESA...</p>
                               <p className="text-xs text-emerald-600 mt-2">Check the phone for the PIN prompt</p>
                             </div>
-                            <button onClick={() => { setPollingStatus('idle'); setIsProcessing(false); }} className="w-full bg-slate-100 text-slate-500 py-3 rounded-2xl font-bold text-[10px] uppercase">Cancel & Retry</button>
+                            <button 
+                              onClick={() => { setPollingStatus('idle'); setIsProcessing(false); }} 
+                              className="w-full bg-slate-100 text-slate-500 py-3 rounded-2xl font-bold text-[10px] uppercase"
+                            >
+                              Cancel & Retry
+                            </button>
                           </div>
                         ) : (
                           <>
                             <input placeholder="07XXXXXXXX" className="w-full bg-slate-100 p-6 rounded-3xl font-black text-2xl text-center outline-none" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
-                            <button onClick={triggerMpesaPush} disabled={isProcessing} className="w-full bg-emerald-600 text-white py-6 rounded-3xl font-black uppercase">{isProcessing ? "Processing..." : "Send STK Push"}</button>
+                            <button onClick={triggerMpesaPush} disabled={isProcessing} className="w-full bg-emerald-600 text-white py-6 rounded-3xl font-black uppercase">
+                              {isProcessing ? "Processing..." : "Send STK Push"}
+                            </button>
                           </>
                         )}
                     </div>
