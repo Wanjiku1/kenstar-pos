@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from "@/lib/supabase";
 import { 
   ShoppingCart, X, Plus, Trash2, Search, Smartphone, 
-  Banknote, Box, Printer, Settings, Percent 
+  Banknote, Box, Printer, Percent 
 } from "lucide-react";
 import { toast } from 'sonner';
 import { printReceipt } from "@/lib/printService";
@@ -25,6 +25,9 @@ export default function KenstarPOS() {
   
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState('');
+
+  // Added for custom order logic consistency
+  const isCustomOrder = cart.some(item => item.products?.name?.includes('[C]'));
 
   useEffect(() => {
     loadData();
@@ -80,16 +83,16 @@ export default function KenstarPOS() {
   const startPolling = (saleId: string, checkoutID: string) => {
     setPollingStatus('waiting');
     const interval = setInterval(async () => {
-      const { data } = await supabase.from('sales').select('*').eq('id', saleId).single();
+      const { data: sale } = await supabase.from('sales').select('*').eq('id', saleId).single();
       
-      // Success check
-      if (data && data.payment_ref !== checkoutID) {
+      // ENTERPRISE SUCCESS CHECK: Callback updates payment_ref with Receipt Number
+      if (sale && sale.payment_ref !== checkoutID) {
         clearInterval(interval);
-        finalizeTransaction(data);
+        finalizeTransaction(sale);
       }
       
-      // Failure check (from callback)
-      if (data && data.collection_status === 'failed') {
+      // FAILURE CHECK: Requires 'failed' added to DB check constraint
+      if (sale && sale.collection_status === 'failed') {
         clearInterval(interval);
         setPollingStatus('idle');
         setIsProcessing(false);
@@ -118,55 +121,74 @@ export default function KenstarPOS() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount: Math.round(total), phone: customerPhone.replace(/^0/, '254') })
       });
-      const data = await res.json();
+      const mpesaData = await res.json();
 
-      if (data.ResponseCode === "0") {
-        const { data: sale, error } = await supabase.from('sales').insert([{
+      if (mpesaData.ResponseCode === "0") {
+        // Step 1: Create Sale (satisfying your CHECK constraints)
+        const { data: sale, error: saleError } = await supabase.from('sales').insert([{
           payment_method: 'mpesa',
           total_amount: total,
-          payment_ref: data.CheckoutRequestID,
+          payment_ref: mpesaData.CheckoutRequestID,
           discount_amount: discount,
           original_total: subtotal,
-          collection_status: 'pending'
+          is_custom_order: isCustomOrder,
+          collection_status: isCustomOrder ? 'to_collect' : 'ready' 
         }]).select().single();
 
-        if (error) throw error;
+        if (saleError) throw saleError;
+
+        // Step 2: Create Sale Items (this triggers your production function)
+        const saleItems = cart.map(item => ({
+          sale_id: sale.id,
+          variant_id: item.id || null,
+          quantity: item.quantity,
+          unit_price: item.price,
+          item_name: item.products?.name || item.item_name
+        }));
+        await supabase.from('sale_items').insert(saleItems);
+
         toast.success("PIN Prompt Sent", { id: toastId });
-        startPolling(sale.id, data.CheckoutRequestID);
+        startPolling(sale.id, mpesaData.CheckoutRequestID);
       } else {
         setIsProcessing(false);
-        toast.error("Push Failed", { id: toastId });
+        toast.error(mpesaData.CustomerMessage || "Push Failed", { id: toastId });
       }
-    } catch (e) {
+    } catch (e: any) {
       setIsProcessing(false);
-      toast.error("Error", { id: toastId });
+      toast.error("Error: " + e.message, { id: toastId });
     }
   };
 
   const handleCashSale = async () => {
-    if (change < 0) return toast.error("Insufficient cash");
+    if (change < 0 && !isCustomOrder) return toast.error("Insufficient cash");
     setIsProcessing(true);
     
-    // Fix: removed 'amount_paid' if column missing, and added 'collection_status'
-    const { data: sale, error } = await supabase.from('sales').insert([{
+    const { data: sale, error: saleError } = await supabase.from('sales').insert([{
       payment_method: 'cash',
       total_amount: total,
       payment_ref: `CASH_${Date.now()}`,
       discount_amount: discount,
       original_total: subtotal,
-      collection_status: 'ready' 
+      is_custom_order: isCustomOrder,
+      collection_status: isCustomOrder ? 'to_collect' : 'ready' 
     }]).select().single();
 
-    if (error) { 
-      console.error(error);
-      toast.error("DB Error: " + error.message); 
+    if (saleError) { 
+      toast.error("DB Error: " + saleError.message); 
       setIsProcessing(false); 
       return; 
     }
 
-    // Attach local data for receipt printing only
-    const saleForReceipt = { ...sale, amount_paid: parseFloat(amountPaid), change: change };
-    finalizeTransaction(saleForReceipt);
+    const saleItems = cart.map(item => ({
+      sale_id: sale.id,
+      variant_id: item.id || null,
+      quantity: item.quantity,
+      unit_price: item.price,
+      item_name: item.products?.name || item.item_name
+    }));
+    await supabase.from('sale_items').insert(saleItems);
+
+    finalizeTransaction({ ...sale, amount_paid: parseFloat(amountPaid), change: change });
   };
 
   return (
