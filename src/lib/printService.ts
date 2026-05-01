@@ -44,7 +44,7 @@ export const printReceipt = (saleData: any, cart: any[], total: number, cashierN
       <body>
         <div class="center">
           <img src="${logoUrl}" class="logo" />
-          <div class="calligraphy">We are here to help</div>
+          <div class="calligraphy">Home of Quality</div>
           <div class="bold" style="font-size: 16px; letter-spacing: 1px;">KENSTAR UNIFORMS</div>
           <div style="font-size: 10px; margin-top: 2px;">UMOJA 1 MARKET, NAIROBI STALL 315/314</div>
           <div style="font-size: 10px;">OPP CO-OPERATIVE BANK UMOJA 1</div>
