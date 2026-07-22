@@ -10,7 +10,7 @@ import {
 import { toast } from 'sonner';
 import { printReceipt } from "@/lib/printService";
 
-const VALID_STAFF_IDS = ["KU001", "KU002", "KU003", "KU004", "KU005"];
+const VALID_STAFF_IDS = ["KU001", "KU003", "KU004", "KU007", "KU008", "KU009"];
 
 export default function KenstarPOS() {
   // Navigation / Workspace Tabs
@@ -585,11 +585,11 @@ export default function KenstarPOS() {
 
               <div className="p-8 bg-slate-50 border-t space-y-4">
                  <div className="flex justify-between items-center">
-                   <span className="text-[10px] font-black uppercase text-slate-400">Manual Discount Adjust</span>
+                   <span className="text-[10px] font-black uppercase text-slate-400">Discount </span>
                    <input className="w-24 bg-white border rounded-lg px-2 py-1 text-right font-black text-xs" type="number" value={discount} onChange={e => setDiscount(parseFloat(e.target.value) || 0)} />
                  </div>
                 <p className="text-2xl font-black text-slate-900 text-right tracking-tight">KES {total.toLocaleString()}</p>
-                <button onClick={() => setCurrentScreen('checkout')} disabled={cart.length === 0} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase text-xs hover:bg-emerald-600 transition-all shadow-md">Proceed to Full-Page Setup</button>
+                <button onClick={() => setCurrentScreen('checkout')} disabled={cart.length === 0} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase text-xs hover:bg-emerald-600 transition-all shadow-md">Complete Sale</button>
               </div>
             </div>
           </div>
@@ -617,7 +617,7 @@ export default function KenstarPOS() {
                       <div className="flex items-center gap-3 bg-slate-800 rounded-xl px-4 py-1 border border-slate-700">
                         <User className="text-emerald-400" size={18}/>
                         <select className="bg-transparent text-white font-bold text-sm w-full outline-none py-3" value={staffId} onChange={e => setStaffId(e.target.value)}>
-                          <option value="" className="text-slate-900">-- Select Assigned Cashier Profile Code --</option>
+                          <option value="" className="text-slate-900">-- Select Cashier ID --</option>
                           {VALID_STAFF_IDS.map(id => <option key={id} value={id} className="text-slate-900">{id}</option>)}
                         </select>
                       </div>
